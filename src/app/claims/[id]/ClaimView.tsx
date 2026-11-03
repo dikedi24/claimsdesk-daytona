@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation";
 import { use, useRef, useState } from "react";
 import { Loading, linkCls } from "@/components/ui";
 import { useAppState } from "@/lib/store";
+import { userName } from "@/lib/users";
 import AuditTab from "./AuditTab";
 import ClaimHeader from "./ClaimHeader";
 import DiaryTab from "./DiaryTab";
@@ -68,6 +69,12 @@ export default function ClaimView({ params }: { params: Promise<{ id: string }> 
           ← Claims
         </Link>
       </p>
+      {search.get("created") === "1" && claim.source === "user" && (
+        <p role="status" className="rounded border border-green-300 bg-green-50 px-3 py-2 text-sm text-green-900">
+          <strong>Claim {claim.number} created.</strong> Next, set initial reserves on the Reserves tab. A diary reminder to obtain a recorded statement
+          was added for {userName(claim.adjusterId)}.
+        </p>
+      )}
       <ClaimHeader s={s} claim={claim} />
 
       <div role="tablist" aria-label="Claim sections" className="flex flex-wrap gap-1 border-b border-slate-300">

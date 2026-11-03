@@ -10,6 +10,7 @@
     "generate:legacy": "node scripts/generate-legacy.mjs"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^1.4.0",
     "next": "16.4.4",
     "papaparse": "^5.7.0",
     "react": "19.3.0",

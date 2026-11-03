@@ -42,7 +42,8 @@ npm run generate:legacy   # regenerate public/legacy_export.csv (deterministic)
 | Claim workspace: reserves, payments, diary, close/reopen, audit trail | Built |
 | Admin: authority limits (Risk Manager only) | Built |
 | Legacy migration: mapping, validation, conversion report, approval | Built |
-| New Claim with AI-assisted intake, Reports, Roadmap | Placeholder pages |
+| New Claim with AI-assisted intake (offline fallback) | Built |
+| Reports, Roadmap | Placeholder pages |
 
 ### Financial rules in the claim workspace
 - **Incurred = paid + outstanding reserve**, tracked per category (Medical, Indemnity, Expense).
@@ -87,10 +88,29 @@ only).
 Regenerate the file with `npm run generate:legacy`. It's deterministic, so the output is identical
 each time.
 
+### New Claim and AI-assisted intake
+- A validated claim form: coded dropdowns filtered by claim type, date pickers, required fields,
+  and checks such as "reported can't be before the date of loss". Saved claims are numbered
+  `WC-2026-0001` / `GL-2026-0001`, and a "recorded statement" diary reminder is added for the
+  adjuster.
+- **Start from a report:** paste a first report of injury or incident report, or pick one of the
+  3 bundled fictional samples. The form is pre-filled, and every suggested field is outlined and
+  marked "AI suggestion — review before saving" with a confidence level until someone changes or
+  keeps it.
+- **AI is advisory.** Nothing is saved until a person clicks **Save claim**. The audit trail
+  records which suggested fields were accepted as-is and which were changed (with both values).
+- **How the AI call works:** `POST /api/extract` runs on the server only. It sends the report to
+  Claude with `@anthropic-ai/sdk`, using a JSON schema that limits coded fields to our code
+  lists. The result is validated again (codes, real past dates, cause matching the claim type)
+  before anything reaches the form.
+- **Offline fallback:** if `ANTHROPIC_API_KEY` is missing or the call fails, a rule-based parser
+  fills the form (it handles the 3 samples). The page shows an "Offline extraction" note giving
+  the reason, and the badges say "Suggested from report (offline parser)".
+
 ### What each role can do
 | Role | Can do |
 | --- | --- |
-| Adjuster (WC / GL) | Work their own claims: reserves, payments, diary, close |
+| Adjuster (WC / GL) | Enter new claims; work their own claims: reserves, payments, diary, close |
 | Supervisor | Work any claim; approve up to $100k reserve / $50k payment; reopen |
 | Risk Manager | Everything, with unlimited authority; edit authority limits; approve or roll back the legacy conversion |
 | Read-only staff | View only |
@@ -101,7 +121,7 @@ Both are optional. The app works fully without them.
 
 | Variable | Purpose | Default |
 | --- | --- | --- |
-| `ANTHROPIC_API_KEY` | Turns on AI suggestions for claim intake (server-side only) | unset (rule-based fallback) |
+| `ANTHROPIC_API_KEY` | Turns on AI suggestions for claim intake. Read only by the server route; never sent to the browser | unset (offline rule-based parser) |
 | `ANTHROPIC_MODEL` | Model used for intake suggestions | `claude-haiku-5-5` |
 
 Put them in `.env.local`, which is git-ignored and must never be committed.
@@ -116,6 +136,8 @@ src/lib/finance.ts  reserve/paid/outstanding/incurred rules, flags, authority li
 src/lib/actions.ts  claim actions (reserves, payments, diary, close) with validation and audit
 src/lib/permissions.ts what the current role may do
 src/lib/legacy.ts   legacy field mapping, validation rules, control totals
+src/lib/intake.ts   intake extraction schema, validation, offline rule-based parser
+src/app/api/extract/route.ts  server route that calls Claude (falls back to the offline parser)
 src/lib/store.ts    seed + localStorage overlay, Reset demo
 scripts/generate-legacy.mjs  generates public/legacy_export.csv
 src/lib/selectors.ts role-aware dashboard queries

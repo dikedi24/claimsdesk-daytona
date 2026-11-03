@@ -1,7 +1,8 @@
 "use client";
 // User actions on claims. Each validates against the financial rules, writes to the
 // localStorage overlay, and records an audit event [3.4H–R, 3.17].
-import { DIARY_CODES } from "./codes";
+import { BODY_PARTS, CAUSES, DAMAGE_TYPES, DEPARTMENTS, DIARY_CODES, bodyLabel, causeLabel, deptLabel, diaryLabel } from "./codes";
+import { FIELD_LABELS, type ExtractKey } from "./intake";
 import { TODAY, addDays, demoTimestamp } from "./dates";
 import { LIMIT_ROLE_LABELS, canApprove, claimReserveAfter, requiredLevel } from "./finance";
 import { money, moneyCents } from "./format";
@@ -12,11 +13,13 @@ import {
   CATEGORIES,
   type AuthorityLimits,
   type Category,
+  type Claim,
+  type ClaimType,
   type DiaryEntry,
   type PayeeType,
   type Payment,
 } from "./types";
-import { DEFAULT_LIMITS, limitRole, userName } from "./users";
+import { DEFAULT_LIMITS, USERS, limitRole, userName } from "./users";
 
 export type Result = { ok: true; message: string } | { ok: false; error: string };
 const fail = (error: string): Result => ({ ok: false, error });
@@ -495,4 +498,114 @@ export function rollbackConversion(): Result {
   setLegacyConversion(null, null);
   updateOverlay((o) => auditEvent({ ...o, migration: undefined }, "Legacy conversion rolled back", undefined, s.migration!.fileName));
   return done("Conversion rolled back. Converted claims have been removed.");
+}
+
+// ---------- Claim intake [3.3, 3.4G, 3.16] ----------
+
+export interface NewClaimInput {
+  type: string;
+  claimantName: string;
+  department: string;
+  dateOfLoss: string;
+  dateReported: string;
+  cause: string;
+  bodyPartOrDamage: string;
+  description: string;
+  adjusterId: string;
+}
+
+/** What the AI (or offline parser) suggested, so the audit trail can record what was accepted. */
+export interface IntakeAssist {
+  source: "ai" | "offline";
+  model?: string;
+  suggested: Partial<Record<ExtractKey, string>>;
+}
+
+export const canCreateClaims = (role: string) => role !== "readonly";
+
+/** Required-field and consistency checks. Returns field → message. */
+export function validateNewClaim(v: NewClaimInput): Partial<Record<keyof NewClaimInput, string>> {
+  const e: Partial<Record<keyof NewClaimInput, string>> = {};
+  if (v.type !== "WC" && v.type !== "GL") e.type = "Choose WC or GL.";
+  if (v.claimantName.trim().length < 2) e.claimantName = "Enter the claimant's name.";
+  if (!DEPARTMENTS.some((d) => d.code === v.department)) e.department = "Choose a department.";
+  const dateOk = (d: string) => /^\d{4}-\d{2}-\d{2}$/.test(d) && !Number.isNaN(Date.parse(d));
+  if (!dateOk(v.dateOfLoss)) e.dateOfLoss = "Enter the date of loss.";
+  else if (v.dateOfLoss > TODAY) e.dateOfLoss = "The date of loss can't be in the future.";
+  if (!dateOk(v.dateReported)) e.dateReported = "Enter the date reported.";
+  else if (v.dateReported > TODAY) e.dateReported = "The date reported can't be in the future.";
+  else if (dateOk(v.dateOfLoss) && v.dateReported < v.dateOfLoss) e.dateReported = "The date reported can't be before the date of loss.";
+  const cause = CAUSES.find((c) => c.code === v.cause);
+  if (!cause || (v.type && cause.type !== v.type)) e.cause = "Choose a cause.";
+  const bodyList = v.type === "GL" ? DAMAGE_TYPES : BODY_PARTS;
+  if (!bodyList.some((b) => b.code === v.bodyPartOrDamage)) e.bodyPartOrDamage = v.type === "GL" ? "Choose a damage type." : "Choose a body part.";
+  if (v.description.trim().length < 10) e.description = "Describe what happened (at least 10 characters).";
+  const adj = USERS.find((u) => u.id === v.adjusterId);
+  if (!adj || (v.type === "WC" && adj.role !== "adjuster_wc") || (v.type === "GL" && adj.role !== "adjuster_gl"))
+    e.adjusterId = "Choose an adjuster for this claim type.";
+  return e;
+}
+
+const displayValue = (k: ExtractKey, v: string) =>
+  k === "department" ? deptLabel(v) : k === "cause" ? causeLabel(v) : k === "bodyPartOrDamage" ? bodyLabel(v) : v;
+
+/** Saves a new claim. Only called when a person clicks Save; AI suggestions are never saved on their own. */
+export function createClaim(v: NewClaimInput, assist?: IntakeAssist): Result & { claimId?: string } {
+  const s = getState();
+  if (!canCreateClaims(s.role)) return fail("Read-only staff can't create claims.");
+  const errors = validateNewClaim(v);
+  if (Object.keys(errors).length) return fail("Some fields need attention before saving.");
+
+  const type = v.type as ClaimType;
+  const year = v.dateOfLoss.slice(0, 4);
+  const prefix = `${type}-${year}-`;
+  const seq = s.claims.reduce((m, c) => (c.number.startsWith(prefix) ? Math.max(m, Number(c.number.slice(prefix.length)) || 0) : m), 0) + 1;
+  const number = `${prefix}${String(seq).padStart(4, "0")}`;
+  const claim: Claim = {
+    id: number,
+    number,
+    type,
+    status: "Open",
+    claimantName: v.claimantName.trim(),
+    department: v.department,
+    dateOfLoss: v.dateOfLoss,
+    dateReported: v.dateReported,
+    cause: v.cause,
+    bodyPartOrDamage: v.bodyPartOrDamage,
+    description: v.description.trim(),
+    adjusterId: v.adjusterId,
+    litigated: false,
+    source: "user",
+  };
+
+  updateOverlay((o) => {
+    let o2: Overlay = { ...o, newClaims: [...o.newClaims, claim] };
+    o2 = auditEvent(o2, "Claim created", number, `${type} claim for ${claim.claimantName}, ${deptLabel(claim.department)}; assigned to ${userName(claim.adjusterId)}.`);
+
+    if (assist && Object.keys(assist.suggested).length) {
+      const keys = Object.keys(assist.suggested) as ExtractKey[];
+      const accepted = keys.filter((k) => assist.suggested[k] === v[k]);
+      const changed = keys.filter((k) => assist.suggested[k] !== v[k]);
+      const by = assist.source === "ai" ? `AI (${assist.model ?? "Claude"})` : "Offline rule-based parser";
+      const details =
+        `${by} suggested ${keys.length} field(s). ` +
+        `Accepted as suggested: ${accepted.map((k) => FIELD_LABELS[k]).join(", ") || "none"}. ` +
+        `Changed before saving: ${
+          changed.map((k) => `${FIELD_LABELS[k]} (suggested "${displayValue(k, assist.suggested[k]!)}", saved "${displayValue(k, v[k])}")`).join("; ") || "none"
+        }. Reviewed and saved by ${s.user.name}.`;
+      o2 = auditEvent(o2, assist.source === "ai" ? "AI-assisted intake reviewed" : "Report-assisted intake reviewed", number, details);
+    }
+
+    // Starting reminder for the assigned adjuster [3.4I].
+    const [id, o3] = nextId(o2, "d");
+    o2 = {
+      ...o3,
+      diary: [
+        ...o3.diary,
+        { id, claimId: number, dueDate: defaultDueDate("STMT"), code: "STMT", note: diaryLabel("STMT"), ownerId: v.adjusterId, completed: false, createdDate: TODAY },
+      ],
+    };
+    return o2;
+  });
+  return { ok: true, message: `Claim ${number} created.`, claimId: number };
 }
