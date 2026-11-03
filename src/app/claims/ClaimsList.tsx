@@ -20,6 +20,7 @@ interface Filters {
   dept: string;
   adjuster: string;
   litigated: string;
+  source: string;
   mine: boolean;
   flagged: boolean;
 }
@@ -34,6 +35,7 @@ export default function ClaimsList() {
     dept: "",
     adjuster: "",
     litigated: "",
+    source: params.get("source") ?? "",
     mine: params.get("mine") === "1",
     flagged: params.get("flagged") === "1",
   }));
@@ -56,6 +58,8 @@ export default function ClaimsList() {
         if (f.adjuster && c.adjusterId !== f.adjuster) return false;
         if (f.litigated === "yes" && !c.litigated) return false;
         if (f.litigated === "no" && c.litigated) return false;
+        if (f.source === "legacy" && c.source !== "legacy") return false;
+        if (f.source === "current" && c.source === "legacy") return false;
         if (f.mine && isAdjuster(s.role) && c.adjusterId !== s.user.id) return false;
         if (f.flagged && c.status === "Closed") return false;
         if (f.flagged && !s.summaries.get(c.id)?.flags.some((x) => x !== "overdue_diary" && x !== "pending_approval"))
@@ -103,6 +107,15 @@ export default function ClaimsList() {
         <Select id="dept" label="Department" value={f.dept} onChange={(v) => set("dept", v)} options={DEPARTMENTS.map((d) => [d.code, d.label])} />
         <Select id="adjuster" label="Adjuster" value={f.adjuster} onChange={(v) => set("adjuster", v)} options={ADJUSTERS.map((u) => [u.id, u.name])} />
         <Select id="litigated" label="Litigated" value={f.litigated} onChange={(v) => set("litigated", v)} options={[["yes", "Yes"], ["no", "No"]]} />
+        {s.legacyCount > 0 && (
+          <Select
+            id="source"
+            label="Source"
+            value={f.source}
+            onChange={(v) => set("source", v)}
+            options={[["current", "Current system"], ["legacy", "Converted legacy"]]}
+          />
+        )}
         <div className="flex flex-col gap-1 pb-1 text-sm">
           {canMine && (
             <label className="flex items-center gap-2">
@@ -117,7 +130,7 @@ export default function ClaimsList() {
           type="button"
           className="rounded border border-slate-300 bg-white px-3 py-1.5 text-sm hover:bg-slate-100"
           onClick={() => {
-            setF({ q: "", type: "", status: "", dept: "", adjuster: "", litigated: "", mine: false, flagged: false });
+            setF({ q: "", type: "", status: "", dept: "", adjuster: "", litigated: "", source: "", mine: false, flagged: false });
             setPage(0);
           }}
         >

@@ -15,6 +15,7 @@ npm install
 npm run dev        # http://localhost:3000
 npm run build      # production build
 npm start          # serve the production build
+npm run generate:legacy   # regenerate public/legacy_export.csv (deterministic)
 ```
 
 ## How the demo works
@@ -40,7 +41,8 @@ npm start          # serve the production build
 | Claims search and filters (type, status, department, adjuster, litigated) | Built |
 | Claim workspace: reserves, payments, diary, close/reopen, audit trail | Built |
 | Admin: authority limits (Risk Manager only) | Built |
-| New Claim with AI-assisted intake, Migration, Reports, Roadmap | Placeholder pages |
+| Legacy migration: mapping, validation, conversion report, approval | Built |
+| New Claim with AI-assisted intake, Reports, Roadmap | Placeholder pages |
 
 ### Financial rules in the claim workspace
 - **Incurred = paid + outstanding reserve**, tracked per category (Medical, Indemnity, Expense).
@@ -58,12 +60,32 @@ npm start          # serve the production build
   entry.
 - **Audit trail**: every change records the user, role and time.
 
+### Legacy migration
+`public/legacy_export.csv` is a generated stand-in for the City's SQL Server export: 16,000 closed
+claims from 2006–2020, with legacy column names, department codes and claim numbers
+(`L-0012345`). It deliberately contains data problems: 240 duplicates, 160 bad or impossible
+dates, 100 unknown department codes, 80 missing claimant names, 50 negative paid amounts, and 80
+rows where paid + reserve doesn't equal incurred.
+
+The Migration page walks through: select the bundled file or upload a CSV → field mapping
+(auto-matched, editable) → validation → conversion report → **Approve conversion** (Risk Manager
+only).
+- The report reconciles records, paid, outstanding and incurred: source = converted + rejected +
+  duplicates, with a $0 difference required before approval.
+- The exceptions list can be downloaded as CSV.
+- Approved claims appear in Claims search as closed, read-only historical claims.
+- Only the approval and the field mapping are saved, never the rows. The conversion is rebuilt
+  from the bundled file on each load.
+
+Regenerate the file with `npm run generate:legacy`. It's deterministic, so the output is identical
+each time.
+
 ### What each role can do
 | Role | Can do |
 | --- | --- |
 | Adjuster (WC / GL) | Work their own claims: reserves, payments, diary, close |
 | Supervisor | Work any claim; approve up to $100k reserve / $50k payment; reopen |
-| Risk Manager | Everything, with unlimited authority; edit authority limits |
+| Risk Manager | Everything, with unlimited authority; edit authority limits; approve or roll back the legacy conversion |
 | Read-only staff | View only |
 
 ## Environment variables
@@ -86,6 +108,8 @@ src/lib/seed.ts     deterministic seed data generator
 src/lib/finance.ts  reserve/paid/outstanding/incurred rules, flags, authority limits
 src/lib/actions.ts  claim actions (reserves, payments, diary, close) with validation and audit
 src/lib/permissions.ts what the current role may do
+src/lib/legacy.ts   legacy field mapping, validation rules, control totals
 src/lib/store.ts    seed + localStorage overlay, Reset demo
+scripts/generate-legacy.mjs  generates public/legacy_export.csv
 src/lib/selectors.ts role-aware dashboard queries
 ```

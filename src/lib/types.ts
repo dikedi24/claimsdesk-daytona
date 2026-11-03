@@ -31,6 +31,16 @@ export interface Claim {
   defenseFirmId?: string;
   closedDate?: string;
   source: "seed" | "user" | "legacy";
+  legacy?: LegacyInfo; // converted legacy claims carry summary financials only [3.21]
+}
+
+export interface LegacyInfo {
+  legacyId: string;
+  examiner: string;
+  sourceDept: string;
+  paid: number;
+  outstanding: number;
+  incurred: number;
 }
 
 // A reserve transaction sets the category's total reserve to newBalance (amount = change).

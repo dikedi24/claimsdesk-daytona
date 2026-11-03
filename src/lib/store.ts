@@ -1,9 +1,11 @@
 "use client";
 // Client-side state: deterministic seed + a small localStorage "overlay" of user changes.
 // The seed is regenerated on every load and never stored; only changes and flags are saved.
+import Papa from "papaparse";
 import { useSyncExternalStore } from "react";
 import { demoTimestamp } from "./dates";
 import { summarize, type ClaimSummary } from "./finance";
+import { convert, type Mapping } from "./legacy";
 import { getSeed } from "./seed";
 import { DEFAULT_LIMITS, userForRole } from "./users";
 import type {
@@ -19,6 +21,17 @@ import type {
 } from "./types";
 
 const STORAGE_KEY = "claimsdesk:v1";
+export const BUNDLED_LEGACY_FILE = "/legacy_export.csv";
+
+/** An approved legacy conversion. Only the decision and mapping are saved, never the rows [3.21]. */
+export interface MigrationRecord {
+  approvedAt: string;
+  approvedBy: string;
+  fileName: string;
+  bundled: boolean; // bundled file can be re-converted on reload; uploads last for the session only
+  mapping: Mapping;
+  converted: number;
+}
 
 export interface Overlay {
   role: Role;
@@ -33,7 +46,7 @@ export interface Overlay {
   audit: AuditEvent[];
   notifications: Notification[];
   limits?: AuthorityLimits;
-  migrationApproved: boolean;
+  migration?: MigrationRecord;
   seq: number;
 }
 
@@ -49,7 +62,6 @@ const emptyOverlay = (): Overlay => ({
   diaryUpdates: {},
   audit: [],
   notifications: [],
-  migrationApproved: false,
   seq: 0,
 });
 
@@ -68,8 +80,12 @@ export interface AppState {
   paymentsByClaim: Map<string, Payment[]>;
   diaryByClaim: Map<string, DiaryEntry[]>;
   summaries: Map<string, ClaimSummary>;
-  migrationApproved: boolean;
+  migration?: MigrationRecord;
+  legacyStatus: LegacyStatus;
+  legacyCount: number;
 }
+
+export type LegacyStatus = "none" | "loading" | "ready" | "error";
 
 const applyUpdates = <T extends { id: string }>(items: T[], updates: Record<string, Partial<T>>) =>
   items.map((x) => (updates[x.id] ? { ...x, ...updates[x.id] } : x));
@@ -87,7 +103,7 @@ function groupBy<T extends { claimId: string }>(items: T[]) {
 function build(o: Overlay): AppState {
   const seed = getSeed();
   const limits = o.limits ?? DEFAULT_LIMITS;
-  const claims = applyUpdates([...seed.claims, ...o.newClaims], o.claimEdits);
+  const claims = applyUpdates([...seed.claims, ...legacyClaims, ...o.newClaims], o.claimEdits);
   const reserves = applyUpdates([...seed.reserves, ...o.reserveTx], o.reserveUpdates);
   const payments = applyUpdates([...seed.payments, ...o.payments], o.paymentUpdates);
   const diary = applyUpdates([...seed.diary, ...o.diary], o.diaryUpdates);
@@ -116,13 +132,51 @@ function build(o: Overlay): AppState {
     paymentsByClaim,
     diaryByClaim,
     summaries,
-    migrationApproved: o.migrationApproved,
+    migration: o.migration,
+    legacyStatus,
+    legacyCount: legacyClaims.length,
   };
 }
 
 let overlay: Overlay | null = null;
 let state: AppState | null = null;
 const listeners = new Set<() => void>();
+
+// Converted legacy claims live in memory only; they are rebuilt from the bundled file on load.
+let legacyClaims: Claim[] = [];
+let legacyStatus: LegacyStatus = "none";
+
+function refresh() {
+  if (!overlay) return;
+  state = build(overlay);
+  listeners.forEach((l) => l());
+}
+
+/** Fetches and parses the bundled legacy export. */
+export async function fetchBundledLegacy(): Promise<{ headers: string[]; rows: Record<string, string>[] }> {
+  const res = await fetch(BUNDLED_LEGACY_FILE);
+  if (!res.ok) throw new Error(`Could not load ${BUNDLED_LEGACY_FILE} (${res.status})`);
+  const parsed = Papa.parse<Record<string, string>>(await res.text(), { header: true, skipEmptyLines: true });
+  return { headers: parsed.meta.fields ?? [], rows: parsed.data };
+}
+
+async function reloadApprovedLegacy(m: MigrationRecord) {
+  legacyStatus = "loading";
+  try {
+    const { rows } = await fetchBundledLegacy();
+    legacyClaims = convert(rows, m.mapping).converted;
+    legacyStatus = "ready";
+  } catch {
+    legacyStatus = "error";
+  }
+  refresh();
+}
+
+/** Puts converted claims into search and reports (called when a conversion is approved or rolled back). */
+export function setLegacyClaims(claims: Claim[]) {
+  legacyClaims = claims;
+  legacyStatus = claims.length ? "ready" : "none";
+}
 
 function load(): Overlay {
   try {
@@ -137,6 +191,13 @@ function load(): Overlay {
 function getSnapshot(): AppState {
   if (!state) {
     overlay = load();
+    if (overlay.migration?.bundled) {
+      legacyStatus = "loading";
+      void reloadApprovedLegacy(overlay.migration);
+    } else if (overlay.migration) {
+      // An uploaded file's conversion can't be rebuilt after a reload.
+      overlay = { ...overlay, migration: undefined };
+    }
     state = build(overlay);
   }
   return state;

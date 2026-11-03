@@ -40,7 +40,7 @@ export default function ClaimHeader({ s, claim }: { s: AppState; claim: Claim })
 
   const can: string[] = [];
   if (!blocked) can.push("change reserves", "request and issue payments", "add diary entries", "close the claim");
-  if (isManager(s.role)) can.push("approve requests within your authority");
+  if (isManager(s.role) && claim.source !== "legacy") can.push("approve requests within your authority");
 
   return (
     <header className="rounded border border-slate-200 bg-white">
@@ -57,7 +57,7 @@ export default function ClaimHeader({ s, claim }: { s: AppState; claim: Claim })
                 Close claim
               </button>
             )}
-            {claim.status === "Closed" && canReopen(s.role) && !reopening && (
+            {claim.status === "Closed" && claim.source !== "legacy" && canReopen(s.role) && !reopening && (
               <button type="button" className={btnSecondary} onClick={() => setReopening(true)}>
                 Reopen claim
               </button>
@@ -73,7 +73,7 @@ export default function ClaimHeader({ s, claim }: { s: AppState; claim: Claim })
           <Field label="Date reported" value={fmtDate(claim.dateReported)} />
           <Field label="Cause" value={causeLabel(claim.cause)} />
           <Field label={claim.type === "WC" ? "Body part" : "Damage type"} value={bodyLabel(claim.bodyPartOrDamage)} />
-          {claim.litigated && <Field label="Defense firm" value={firmLabel(claim.defenseFirmId)} />}
+          {claim.litigated && claim.defenseFirmId && <Field label="Defense firm" value={firmLabel(claim.defenseFirmId)} />}
           {claim.closedDate && <Field label="Closed" value={fmtDate(claim.closedDate)} />}
         </dl>
 

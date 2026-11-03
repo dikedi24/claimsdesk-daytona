@@ -87,8 +87,11 @@ const bodyMap = new Map([...index(BODY_PARTS), ...index(DAMAGE_TYPES)]);
 const diaryMap = index(DIARY_CODES);
 const firmMap = index(DEFENSE_FIRMS);
 
-export const deptLabel = (c: string) => deptMap.get(c) ?? c;
-export const causeLabel = (c: string) => causeMap.get(c) ?? c;
-export const bodyLabel = (c: string) => bodyMap.get(c) ?? c;
+// Codes used only by converted legacy claims when a legacy value has no match.
+export const UNASSIGNED = "UNK";
+export const OTHER = "OTHER";
+export const deptLabel = (c: string) => deptMap.get(c) ?? (c === UNASSIGNED ? "Unassigned" : c);
+export const causeLabel = (c: string) => causeMap.get(c) ?? (c === OTHER ? "Other / unspecified" : c);
+export const bodyLabel = (c: string) => bodyMap.get(c) ?? (c === OTHER ? "Other / unspecified" : c);
 export const diaryLabel = (c: string) => diaryMap.get(c) ?? c;
 export const firmLabel = (c?: string) => (c ? firmMap.get(c) ?? c : "");

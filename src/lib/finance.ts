@@ -95,6 +95,11 @@ export function summarize(
   limits: AuthorityLimits,
 ): ClaimSummary {
   const byCat = emptyTotals();
+  if (claim.legacy) {
+    // Converted legacy claims carry summary totals only (no transaction history) [3.21].
+    const { paid, outstanding, incurred } = claim.legacy;
+    return { byCat, reserve: incurred, paid, outstanding, incurred, flags: [], overdueDiary: 0 };
+  }
   const balances = reserveBalances(reserves);
   for (const cat of CATEGORIES) byCat[cat].reserve = balances[cat];
   for (const p of payments) {

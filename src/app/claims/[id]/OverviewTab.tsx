@@ -23,6 +23,8 @@ export default function OverviewTab({ s, claim }: { s: AppState; claim: Claim })
   const sum = s.summaries.get(claim.id)!;
   const diary = (s.diaryByClaim.get(claim.id) ?? []).filter((d) => !d.completed).sort((a, b) => a.dueDate.localeCompare(b.dueDate));
 
+  if (claim.legacy) return <LegacyOverview claim={claim} />;
+
   return (
     <div className="space-y-4">
       <Card title="What happened">
@@ -88,6 +90,42 @@ export default function OverviewTab({ s, claim }: { s: AppState; claim: Claim })
             ))}
           </ul>
         )}
+      </Card>
+    </div>
+  );
+}
+
+/** Converted legacy claims carry summary totals only [3.21]. */
+function LegacyOverview({ claim }: { claim: Claim }) {
+  const l = claim.legacy!;
+  return (
+    <div className="space-y-4">
+      <p className="rounded border border-sky-300 bg-sky-50 px-3 py-2 text-sm text-sky-950">
+        <strong>Converted from the legacy system.</strong> Summary totals only; the detailed transaction history remains in the legacy archive.
+      </p>
+      <Card title="What happened">
+        <p className="text-sm text-slate-800">{claim.description || "No description in the legacy record."}</p>
+      </Card>
+      <Card title="Legacy financial totals">
+        <table className={tableCls}>
+          <tbody>
+            <tr className={rowCls}>
+              <th scope="row" className={`${td} text-left font-normal`}>Total paid</th>
+              <td className={`${td} text-right tabular-nums`}>{money(l.paid)}</td>
+            </tr>
+            <tr className={rowCls}>
+              <th scope="row" className={`${td} text-left font-normal`}>Outstanding reserve at conversion</th>
+              <td className={`${td} text-right tabular-nums`}>{money(l.outstanding)}</td>
+            </tr>
+            <tr className="border-t-2 border-slate-300 font-semibold">
+              <th scope="row" className={`${td} text-left`}>Total incurred</th>
+              <td className={`${td} text-right tabular-nums`}>{money(l.incurred)}</td>
+            </tr>
+          </tbody>
+        </table>
+        <p className="mt-2 text-xs text-slate-600">
+          Legacy record ID {l.legacyId || "—"} · examiner {l.examiner || "—"} · legacy department code {l.sourceDept || "—"}
+        </p>
       </Card>
     </div>
   );

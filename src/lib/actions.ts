@@ -6,7 +6,8 @@ import { TODAY, addDays, demoTimestamp } from "./dates";
 import { LIMIT_ROLE_LABELS, canApprove, claimReserveAfter, requiredLevel } from "./finance";
 import { money, moneyCents } from "./format";
 import { canEditClaim, canWorkClaim, canReopen } from "./permissions";
-import { auditEvent, getState, nextId, updateOverlay, type Overlay } from "./store";
+import type { ConversionResult, Mapping } from "./legacy";
+import { auditEvent, getState, nextId, setLegacyClaims, updateOverlay, type Overlay } from "./store";
 import {
   CATEGORIES,
   type AuthorityLimits,
@@ -419,3 +420,35 @@ export function restoreDefaultLimits(): Result {
 }
 
 export const canEditLimits = (role: string) => role === "risk_manager";
+
+// ---------- Legacy conversion [3.2D, 3.21] ----------
+
+export function approveConversion(result: ConversionResult, mapping: Mapping, fileName: string, bundled: boolean): Result {
+  const s = getState();
+  if (s.role !== "risk_manager") return fail("Only the Risk Manager can approve the conversion.");
+  if (s.migration) return fail("A conversion has already been approved. Roll it back first to approve a different file.");
+  const t = result.totals;
+  setLegacyClaims(result.converted);
+  updateOverlay((o) =>
+    auditEvent(
+      {
+        ...o,
+        migration: { approvedAt: demoTimestamp(), approvedBy: s.user.id, fileName, bundled, mapping, converted: result.converted.length },
+      },
+      "Legacy conversion approved",
+      undefined,
+      `${fileName}: ${t.source.rows} source rows; ${t.converted.rows} converted, ${t.rejected.rows} rejected, ${t.duplicates.rows} duplicates. ` +
+        `Converted paid ${money(t.converted.paid)}, outstanding ${money(t.converted.outstanding)}. Control totals tie out.`,
+    ),
+  );
+  return done(`Conversion approved. ${result.converted.length.toLocaleString("en-US")} historical claims are now searchable.`);
+}
+
+export function rollbackConversion(): Result {
+  const s = getState();
+  if (s.role !== "risk_manager") return fail("Only the Risk Manager can roll back the conversion.");
+  if (!s.migration) return fail("There is no approved conversion to roll back.");
+  setLegacyClaims([]);
+  updateOverlay((o) => auditEvent({ ...o, migration: undefined }, "Legacy conversion rolled back", undefined, s.migration!.fileName));
+  return done("Conversion rolled back. Converted claims have been removed.");
+}

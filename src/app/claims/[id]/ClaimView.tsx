@@ -31,6 +31,7 @@ export default function ClaimView({ params }: { params: Promise<{ id: string }> 
   if (!s) return <Loading />;
 
   const claim = s.claimsById.get(decodeURIComponent(id));
+  if (!claim && s.legacyStatus === "loading") return <Loading />; // converted legacy claims load after the page
   if (!claim) {
     return (
       <div>
