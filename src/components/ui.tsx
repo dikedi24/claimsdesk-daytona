@@ -11,7 +11,7 @@ export function PageTitle({ title, subtitle }: { title: string; subtitle?: React
 export function Loading() {
   return (
     <p role="status" className="text-slate-600">
-      Loading claims…
+      Loading…
     </p>
   );
 }

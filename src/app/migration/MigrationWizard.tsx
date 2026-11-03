@@ -670,7 +670,7 @@ function ExceptionsCard({
       }
     >
       <ResultMessage result={message} />
-      <div role="tablist" aria-label="Exception lists" className="my-3 flex flex-wrap gap-1">
+      <div role="group" aria-label="Exception lists" className="my-3 flex flex-wrap gap-1">
         {(
           [
             ["held", `Held for correction (${count(result.held.length)})`],
@@ -680,8 +680,8 @@ function ExceptionsCard({
         ).map(([k, label]) => (
           <button
             key={k}
-            role="tab"
-            aria-selected={tab === k}
+            type="button"
+            aria-pressed={tab === k}
             className={`rounded border px-3 py-1 text-sm ${
               tab === k ? "border-[#0b3a5b] bg-[#0b3a5b] font-semibold text-white" : "border-slate-300 hover:bg-slate-100"
             }`}
@@ -709,7 +709,7 @@ function ExceptionsCard({
           Columns not converted (kept in the legacy archive): <span className="font-mono">{result.unmappedColumns.join(", ")}</span>
         </p>
       )}
-      <div role="tabpanel" className="overflow-x-auto">
+      <div className="overflow-x-auto" aria-live="polite">
         {list.length === 0 ? (
           <p className="text-sm text-slate-600">{tab === "held" ? "No rows are held. Every valid record has converted." : "None."}</p>
         ) : (

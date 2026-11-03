@@ -52,13 +52,17 @@ export default function ClaimView({ params }: { params: Promise<{ id: string }> 
     diary: s.summaries.get(claim.id)!.overdueDiary,
   };
 
+  // Converted legacy claims carry summary totals only, so they show just Overview and Audit trail.
+  const tabs = claim.legacy ? TABS.filter((t) => t.key === "overview" || t.key === "audit") : TABS;
+  const active: TabKey = tabs.some((t) => t.key === tab) ? tab : "overview";
+
   // Arrow-key navigation between tabs (WAI-ARIA tabs pattern).
   const onKey = (e: React.KeyboardEvent, i: number) => {
     const dir = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
     if (!dir) return;
     e.preventDefault();
-    const next = (i + dir + TABS.length) % TABS.length;
-    setTab(TABS[next].key);
+    const next = (i + dir + tabs.length) % tabs.length;
+    setTab(tabs[next].key);
     tabRefs.current[next]?.focus();
   };
 
@@ -78,8 +82,8 @@ export default function ClaimView({ params }: { params: Promise<{ id: string }> 
       <ClaimHeader s={s} claim={claim} />
 
       <div role="tablist" aria-label="Claim sections" className="flex flex-wrap gap-1 border-b border-slate-300">
-        {TABS.map((t, i) => {
-          const selected = tab === t.key;
+        {tabs.map((t, i) => {
+          const selected = active === t.key;
           return (
             <button
               key={t.key}
@@ -108,12 +112,12 @@ export default function ClaimView({ params }: { params: Promise<{ id: string }> 
         })}
       </div>
 
-      <div role="tabpanel" id={`panel-${tab}`} aria-labelledby={`tab-${tab}`} tabIndex={0} className="focus:outline-none">
-        {tab === "overview" && <OverviewTab s={s} claim={claim} />}
-        {tab === "reserves" && <ReservesTab s={s} claim={claim} />}
-        {tab === "payments" && <PaymentsTab s={s} claim={claim} />}
-        {tab === "diary" && <DiaryTab s={s} claim={claim} />}
-        {tab === "audit" && <AuditTab s={s} claim={claim} />}
+      <div role="tabpanel" id={`panel-${active}`} aria-labelledby={`tab-${active}`} tabIndex={0} className="focus:outline-none">
+        {active === "overview" && <OverviewTab s={s} claim={claim} />}
+        {active === "reserves" && <ReservesTab s={s} claim={claim} />}
+        {active === "payments" && <PaymentsTab s={s} claim={claim} />}
+        {active === "diary" && <DiaryTab s={s} claim={claim} />}
+        {active === "audit" && <AuditTab s={s} claim={claim} />}
       </div>
     </div>
   );

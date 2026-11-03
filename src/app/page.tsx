@@ -55,8 +55,8 @@ export default function Dashboard() {
   return (
     <div className="space-y-6">
       <PageTitle
-        title={`Good morning, ${s.user.name.split(" ")[0]}`}
-        subtitle={own ? "Your caseload as of today." : "Office-wide view of all adjusters' claims as of today."}
+        title="Dashboard"
+        subtitle={`${s.user.name}, ${s.user.title}. ${own ? "Your caseload" : "Office-wide view of all adjusters' claims"} as of ${fmtDate(TODAY)}.`}
       />
 
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">

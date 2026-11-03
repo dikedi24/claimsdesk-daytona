@@ -4,7 +4,7 @@ import { useState } from "react";
 import { Card, Loading, PageTitle, ResultMessage, btnPrimary, btnSecondary, inputCls, rowCls, tableCls, td, th, theadCls } from "@/components/ui";
 import { restoreDefaultLimits, saveLimits, type Result } from "@/lib/actions";
 import { LIMIT_ROLE_LABELS } from "@/lib/finance";
-import { fmtDate, money } from "@/lib/format";
+import { fmtDateTime, money } from "@/lib/format";
 import { useAppState, type AppState } from "@/lib/store";
 import type { AuthorityLimits, LimitRole } from "@/lib/types";
 import { roleLabel, userName } from "@/lib/users";
@@ -120,7 +120,7 @@ function Editor({ s, result, setResult }: { s: AppState; result: Result | null; 
           <ul className="space-y-1 text-sm">
             {history.map((h) => (
               <li key={h.id}>
-                {fmtDate(h.timestamp)} {h.timestamp.slice(11, 16)} — {userName(h.userId)}: {h.details}
+                {fmtDateTime(h.timestamp)} — {userName(h.userId)}: {h.details}
               </li>
             ))}
           </ul>

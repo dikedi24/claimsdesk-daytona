@@ -208,7 +208,7 @@ export default function NewClaimForm() {
                   </select>
                 </Field>
                 <Field k="claimantName" label="Claimant" required errors={errors} suggestion={suggestions.claimantName} value={values.claimantName}>
-                  <input id="f-claimantName" className={`${inputCls} w-full`} value={values.claimantName} onChange={(e) => set("claimantName", e.target.value)} {...aria("claimantName", errors)} />
+                  <input id="f-claimantName" maxLength={80} autoComplete="off" className={`${inputCls} w-full`} value={values.claimantName} onChange={(e) => set("claimantName", e.target.value)} {...aria("claimantName", errors)} />
                 </Field>
                 <Field k="department" label="Department" required errors={errors} suggestion={suggestions.department} value={values.department}>
                   <select id="f-department" className={`${inputCls} w-full`} value={values.department} onChange={(e) => set("department", e.target.value)} {...aria("department", errors)}>
@@ -271,7 +271,7 @@ export default function NewClaimForm() {
                 </Field>
                 <div className="md:col-span-2">
                   <Field k="description" label="Description" required errors={errors} suggestion={suggestions.description} value={values.description}>
-                    <textarea id="f-description" rows={4} className={`${inputCls} w-full`} value={values.description} onChange={(e) => set("description", e.target.value)} {...aria("description", errors)} />
+                    <textarea id="f-description" rows={4} maxLength={1000} className={`${inputCls} w-full`} value={values.description} onChange={(e) => set("description", e.target.value)} {...aria("description", errors)} />
                   </Field>
                 </div>
               </fieldset>

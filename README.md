@@ -18,6 +18,33 @@ npm start          # serve the production build
 npm run generate:legacy   # regenerate public/legacy_export.csv (deterministic)
 ```
 
+**No API key is needed.** Without `ANTHROPIC_API_KEY`, everything works. The only difference is
+on New Claim: "Fill form from report" uses an offline rule-based parser (which handles the 3
+bundled samples) and shows an "Offline extraction" note.
+
+Live demo: https://claimsdesk-daytona.vercel.app/
+
+## Suggested demo walkthrough (about 10 minutes)
+
+1. **Dashboard (Adjuster WC):** open claims, approvals, overdue diary and flags for Pat's
+   caseload.
+2. **New Claim:** pick the Public Works sample, then click **Fill form from report**. Point out
+   the "review before saving" markers, change one field, and click **Save claim**. The audit
+   trail shows which suggestions were accepted.
+3. **Claim WC-2026-0047:** a low-reserve flag and a $57k reserve increase waiting for the
+   Supervisor.
+4. **Switch to Supervisor:** approve the reserve change. On WC-2026-0069, the $89,900 payment
+   is *Escalated: Risk Manager*, so the Supervisor can't approve it.
+5. **Switch to Risk Manager:** approve the payment. On **Admin**, change a limit and watch the
+   routing update.
+6. **Migration:** use the bundled file, then go through mapping, validation and the conversion
+   report ("15,390 converted · 370 held for correction · 240 duplicates excluded · 0 records
+   lost"). Fix one held row inline, then **Approve conversion**.
+7. **Reports:** the "as of" report (change the date, click a department), the claims-by-year
+   chart (Bar/Line, now back to 2006), litigation by firm, and CSV downloads.
+8. **Roadmap:** what's built, what's simulated, and the production approach for the rest.
+9. **Reset demo** to start clean.
+
 ## How the demo works
 
 - **No database, no login.** About 1,300 claims dated 2021–2026, each with dated reserve and
@@ -135,6 +162,17 @@ backups, custom fields, and data export at termination.
 | Supervisor | Work any claim; approve up to $100k reserve / $50k payment; reopen |
 | Risk Manager | Everything, with unlimited authority; edit authority limits; approve or roll back the legacy conversion |
 | Read-only staff | View only |
+
+## Known limitations of the demo
+
+- Data lives in one browser (localStorage). Two people won't see each other's changes, and
+  **Reset demo** clears them.
+- Converted legacy claims carry summary totals only. "As of" reports show their final totals
+  for past dates, and an approved *uploaded* file lasts only until the page reloads (the
+  bundled file is rebuilt on every load).
+- Seeded history predates the authority rules, so some historical reserve changes by adjusters
+  exceed today's limits.
+- Desktop-first: tested at 1280px and 1024px widths. Phone layouts are not optimized.
 
 ## Environment variables
 

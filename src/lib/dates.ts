@@ -8,8 +8,9 @@ export const fromDayNum = (n: number) => new Date(n * DAY).toISOString().slice(0
 export const addDays = (iso: string, n: number) => fromDayNum(dayNum(iso) + n);
 export const daysBetween = (a: string, b: string) => dayNum(b) - dayNum(a);
 
-/** A timestamp on the demo date, keeping the real clock time so audit events stay ordered. */
+/** A timestamp on the demo date with the viewer's local clock time, so audit events stay ordered. */
 export function demoTimestamp(): string {
   const now = new Date();
-  return `${TODAY}T${now.toISOString().slice(11)}`;
+  const p = (n: number, w = 2) => String(n).padStart(w, "0");
+  return `${TODAY}T${p(now.getHours())}:${p(now.getMinutes())}:${p(now.getSeconds())}.${p(now.getMilliseconds(), 3)}`;
 }

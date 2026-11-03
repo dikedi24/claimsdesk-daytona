@@ -528,6 +528,7 @@ export function validateNewClaim(v: NewClaimInput): Partial<Record<keyof NewClai
   const e: Partial<Record<keyof NewClaimInput, string>> = {};
   if (v.type !== "WC" && v.type !== "GL") e.type = "Choose WC or GL.";
   if (v.claimantName.trim().length < 2) e.claimantName = "Enter the claimant's name.";
+  else if (v.claimantName.trim().length > 80) e.claimantName = "Keep the claimant's name to 80 characters or fewer.";
   if (!DEPARTMENTS.some((d) => d.code === v.department)) e.department = "Choose a department.";
   const dateOk = (d: string) => /^\d{4}-\d{2}-\d{2}$/.test(d) && !Number.isNaN(Date.parse(d));
   if (!dateOk(v.dateOfLoss)) e.dateOfLoss = "Enter the date of loss.";
@@ -540,6 +541,7 @@ export function validateNewClaim(v: NewClaimInput): Partial<Record<keyof NewClai
   const bodyList = v.type === "GL" ? DAMAGE_TYPES : BODY_PARTS;
   if (!bodyList.some((b) => b.code === v.bodyPartOrDamage)) e.bodyPartOrDamage = v.type === "GL" ? "Choose a damage type." : "Choose a body part.";
   if (v.description.trim().length < 10) e.description = "Describe what happened (at least 10 characters).";
+  else if (v.description.trim().length > 1000) e.description = "Keep the description to 1,000 characters or fewer.";
   const adj = USERS.find((u) => u.id === v.adjusterId);
   if (!adj || (v.type === "WC" && adj.role !== "adjuster_wc") || (v.type === "GL" && adj.role !== "adjuster_gl"))
     e.adjusterId = "Choose an adjuster for this claim type.";

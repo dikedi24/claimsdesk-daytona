@@ -88,7 +88,7 @@ function NavList({ pathname }: { pathname: string | null }) {
               <Link
                 href={n.href}
                 aria-current={active ? "page" : undefined}
-                className={`block border-l-4 px-4 py-2 text-sm focus:outline-none focus-visible:bg-sky-100 ${
+                className={`block border-l-4 px-4 py-2 text-sm focus:outline-none focus-visible:bg-sky-100 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-sky-600 ${
                   active
                     ? "border-[#0b3a5b] bg-white font-semibold text-[#0b3a5b]"
                     : "border-transparent text-slate-700 hover:bg-white hover:text-slate-900"
@@ -115,7 +115,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
         <Suspense fallback={<NavList pathname={null} />}>
           <ActiveNav />
         </Suspense>
-        <main id="main" className="min-w-0 flex-1 px-6 py-5">
+        <main id="main" tabIndex={-1} className="min-w-0 flex-1 px-6 py-5 focus:outline-none">
           {children}
         </main>
       </div>

@@ -1,7 +1,7 @@
 "use client";
 // Audit trail: every change with user, role and timestamp [3.4R]. Seeded history is shown as dated rows.
 import { Card, rowCls, tableCls, td, th, theadCls } from "@/components/ui";
-import { fmtDate, money, moneyCents } from "@/lib/format";
+import { fmtDateTime, money, moneyCents } from "@/lib/format";
 import type { AppState } from "@/lib/store";
 import type { Claim, Role } from "@/lib/types";
 import { roleLabel, userName } from "@/lib/users";
@@ -18,10 +18,7 @@ interface Row {
 
 const isUserCreated = (id: string) => id.includes("-u");
 
-function fmtWhen(when: string) {
-  if (when.length <= 10) return fmtDate(when);
-  return `${fmtDate(when)} ${when.slice(11, 16)}`;
-}
+const fmtWhen = (when: string) => fmtDateTime(when);
 
 export default function AuditTab({ s, claim }: { s: AppState; claim: Claim }) {
   const rows: Row[] = s.audit
