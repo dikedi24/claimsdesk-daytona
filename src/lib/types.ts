@@ -46,6 +46,8 @@ export interface ReserveTransaction {
   byRole: Role;
   reason: string;
   status: "Approved" | "PendingApproval" | "Rejected";
+  decidedBy?: string; // approver or rejecter of a pending change
+  rejectReason?: string;
 }
 
 export type PaymentStatus = "Requested" | "Approved" | "Rejected" | "Issued";
@@ -64,6 +66,7 @@ export interface Payment {
   requestedByRole: Role;
   status: PaymentStatus;
   approvedBy?: string;
+  rejectedBy?: string;
   rejectReason?: string;
   issuedDate?: string;
   memo?: string;

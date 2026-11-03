@@ -143,6 +143,6 @@ export function summarize(
 }
 
 /** Total claim reserve if a pending reserve change were approved (authority is checked on claim total). */
-export function claimReserveAfter(balances: Record<Category, number>, r: ReserveTransaction) {
+export function claimReserveAfter(balances: Record<Category, number>, r: Pick<ReserveTransaction, "category" | "newBalance">) {
   return CATEGORIES.reduce((s, c) => s + (c === r.category ? r.newBalance : balances[c]), 0);
 }

@@ -48,3 +48,27 @@ export function Flags({ flags }: { flags: FlagKind[] }) {
 export function LitigatedBadge() {
   return <span className={`${base} bg-rose-50 text-rose-800 border-rose-300`}>Litigated</span>;
 }
+
+const PAY: Record<string, string> = {
+  Requested: "bg-blue-50 text-blue-800 border-blue-300",
+  Approved: "bg-teal-50 text-teal-900 border-teal-300",
+  Issued: "bg-slate-100 text-slate-800 border-slate-300",
+  Rejected: "bg-red-50 text-red-800 border-red-300",
+  PendingApproval: "bg-blue-50 text-blue-800 border-blue-300",
+};
+const PAY_LABEL: Record<string, string> = { Requested: "Awaiting approval", PendingApproval: "Awaiting approval" };
+
+/** Status of a payment or reserve change. */
+export function TxStatusBadge({ status }: { status: string }) {
+  return <span className={`${base} ${PAY[status] ?? PAY.Issued}`}>{PAY_LABEL[status] ?? status}</span>;
+}
+
+/** Which level must approve, with an "Escalated" flag above Supervisor [3.17D]. */
+export function LevelBadge({ level, label }: { level: string; label: string }) {
+  const esc = level === "risk_manager";
+  return (
+    <span className={`${base} ${esc ? "bg-purple-50 text-purple-800 border-purple-300" : "bg-blue-50 text-blue-800 border-blue-300"}`}>
+      {esc ? `Escalated: ${label}` : `Awaiting ${label}`}
+    </span>
+  );
+}

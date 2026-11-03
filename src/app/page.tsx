@@ -88,7 +88,7 @@ export default function Dashboard() {
                   {approvals.map((a) => (
                     <tr key={a.id} className={rowCls}>
                       <td className={td}>
-                        <Link href={`/claims/${a.claimId}`} className={linkCls}>
+                        <Link href={`/claims/${a.claimId}?tab=${a.kind === "payment" ? "payments" : "reserves"}`} className={linkCls}>
                           {s.claimsById.get(a.claimId)?.number}
                         </Link>
                       </td>
@@ -142,7 +142,7 @@ export default function Dashboard() {
                   {overdue.slice(0, 15).map((d) => (
                     <tr key={d.id} className={rowCls}>
                       <td className={td}>
-                        <Link href={`/claims/${d.claimId}`} className={linkCls}>
+                        <Link href={`/claims/${d.claimId}?tab=diary`} className={linkCls}>
                           {s.claimsById.get(d.claimId)?.number}
                         </Link>
                       </td>

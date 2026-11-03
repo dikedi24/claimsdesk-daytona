@@ -142,6 +142,9 @@ function getSnapshot(): AppState {
   return state;
 }
 
+/** Current state for use outside React (actions). */
+export const getState = getSnapshot;
+
 const getServerSnapshot = () => null;
 
 function subscribe(fn: () => void) {

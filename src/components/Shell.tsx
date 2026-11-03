@@ -4,6 +4,7 @@ import { Suspense } from "react";
 import { usePathname } from "next/navigation";
 import { resetDemo, setRole, useAppState } from "@/lib/store";
 import { ROLES } from "@/lib/users";
+import Notifications from "./Notifications";
 import { fmtDate } from "@/lib/format";
 import { TODAY } from "@/lib/dates";
 import type { Role } from "@/lib/types";
@@ -59,6 +60,7 @@ function Header() {
             </span>
           )}
         </div>
+        {s && <Notifications s={s} />}
         <button
           type="button"
           onClick={onReset}
