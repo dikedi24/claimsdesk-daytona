@@ -154,6 +154,14 @@ const ROWS: Row[] = [
       "Discovery would confirm how the legacy system stores suffix claims, which may explain why the 16,000-record count exceeds the City's ~258 claims/year.",
   },
   {
+    area: "Responsive phone and tablet layouts (portrait and landscape)",
+    ref: "5.19",
+    status: "Roadmap",
+    demo: "Desktop-first; tested at laptop widths (1024px and up).",
+    production:
+      "Demo is desktop-first for adjusters at their desks. Production would add a collapsible nav and phone-friendly claim views for supervisors approving payments on the go and staff reviewing claims away from a desk, tested against WCAG 2.0 AA (RFP 5.19).",
+  },
+  {
     area: "Recurring payment schedules",
     ref: "3.11",
     status: "Roadmap",
