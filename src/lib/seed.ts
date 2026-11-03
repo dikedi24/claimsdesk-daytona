@@ -3,6 +3,7 @@
 import { CAUSES, DEFENSE_FIRMS, DIARY_CODES } from "./codes";
 import { TODAY, addDays, dayNum, fromDayNum } from "./dates";
 import { createRng, type Rng } from "./rng";
+import { DEFAULT_LIMITS } from "./users";
 import type {
   Category,
   Claim,
@@ -386,6 +387,48 @@ function seedPendingWork(b: Builder, claims: Claim[]) {
   }
 }
 
+/** Approver whose default authority covers the amount, or null if the adjuster's own limit does. */
+function approverFor(kind: "reserve" | "payment", amount: number): string | null {
+  const within = (limit: number | null) => limit === null || amount <= limit;
+  if (within(DEFAULT_LIMITS.adjuster[kind])) return null;
+  return within(DEFAULT_LIMITS.supervisor[kind]) ? "u-sup" : "u-rm";
+}
+
+/**
+ * Seeded history never contradicts authority limits [3.17C, 3.17D]: any historical reserve change that left
+ * the claim's total reserve above the adjuster's limit, and any payment above the adjuster's payment limit,
+ * carries an approval by the Supervisor or Risk Manager. Pending seeded items stay pending.
+ */
+function applyAuthority(b: Builder) {
+  const byClaim = new Map<string, { r: ReserveTransaction; i: number }[]>();
+  b.reserves.forEach((r, i) => {
+    if (r.status !== "Approved") return;
+    const list = byClaim.get(r.claimId);
+    if (list) list.push({ r, i });
+    else byClaim.set(r.claimId, [{ r, i }]);
+  });
+  for (const list of byClaim.values()) {
+    list.sort((x, y) => x.r.date.localeCompare(y.r.date) || x.i - y.i);
+    const bal: Record<Category, number> = { Medical: 0, Indemnity: 0, Expense: 0 };
+    for (const { r } of list) {
+      bal[r.category] = r.newBalance;
+      const approver = approverFor("reserve", bal.Medical + bal.Indemnity + bal.Expense);
+      if (approver) {
+        r.decidedBy = approver;
+        r.historicalApproval = true;
+      }
+    }
+  }
+  for (const p of b.payments) {
+    if (p.status !== "Issued") continue;
+    const approver = approverFor("payment", p.amount);
+    if (approver) {
+      p.approvedBy = approver;
+      p.historicalApproval = true;
+    }
+  }
+}
+
 let cached: SeedData | null = null;
 
 export function getSeed(): SeedData {
@@ -415,6 +458,7 @@ export function getSeed(): SeedData {
 
   for (const c of claims) buildFinancials(b, c);
   seedPendingWork(b, claims);
+  applyAuthority(b);
 
   cached = { claims, reserves: b.reserves, payments: b.payments, diary: b.diary };
   return cached;

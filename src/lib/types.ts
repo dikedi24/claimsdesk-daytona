@@ -59,6 +59,7 @@ export interface ReserveTransaction {
   status: "Approved" | "PendingApproval" | "Rejected";
   decidedBy?: string; // approver or rejecter of a pending change
   rejectReason?: string;
+  historicalApproval?: boolean; // seeded history: approved by decidedBy before this demo session
 }
 
 export type PaymentStatus = "Requested" | "Approved" | "Rejected" | "Issued";
@@ -77,6 +78,7 @@ export interface Payment {
   requestedByRole: Role;
   status: PaymentStatus;
   approvedBy?: string;
+  historicalApproval?: boolean; // seeded history: approved by approvedBy before this demo session
   rejectedBy?: string;
   rejectReason?: string;
   issuedDate?: string;

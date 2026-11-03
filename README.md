@@ -50,6 +50,10 @@ Live demo: https://claimsdesk-daytona.vercel.app/
 - **No database, no login.** About 1,300 claims dated 2021–2026, each with dated reserve and
   payment transactions, are generated in the browser from a fixed random seed. The data is
   identical on every load.
+- **Seeded history respects authority limits.** Any historical reserve change that took a claim's
+  total reserve above $25k, and any payment above $10k, carries an approval by the Supervisor
+  (or by the Risk Manager above $100k reserve / $50k payment). These approvals appear in the
+  audit trail.
 - **Fixed demo date.** "Today" is always **November 1, 2026**, so overdue diary items and
   aging look the same whenever the demo is opened.
 - **Role switcher** in the header (Adjuster WC, Adjuster GL, Supervisor, Risk Manager,
@@ -141,13 +145,15 @@ each time.
   department to drill down to its claims, with each claim's status, paid, outstanding and
   incurred on that date.
 - **Claims by year:** claims reported or total incurred per loss year, WC vs. GL, switchable
-  between bar and line. The chart is a small dependency-free SVG with a legend, hover values
+  between bar and line. The default range is 2021–2026. Once the conversion is approved, an
+  **Include legacy history** toggle adds 2006–2020, with a note that those rows reflect the City's
+  stated 16,000-record count. The chart is a small dependency-free SVG with a legend, hover values
   and a data table.
 - **Litigated claims by defense firm:** claim count, active claims, total paid to the firm,
   and incurred.
 - **CSV download on every report**, including the drill-down.
 - **Converted legacy claims:** once the conversion is approved, the reports include them and
-  the loss-year range extends back to 2006. They carry final summary totals only.
+  the "as of" loss-year range extends back to 2006. They carry final summary totals only.
 
 ### Roadmap
 A table of the RFP requirement areas, each marked **Built**, **Simulated in demo** or
@@ -170,8 +176,6 @@ backups, custom fields, and data export at termination.
 - Converted legacy claims carry summary totals only. "As of" reports show their final totals
   for past dates, and an approved *uploaded* file lasts only until the page reloads (the
   bundled file is rebuilt on every load).
-- Seeded history predates the authority rules, so some historical reserve changes by adjusters
-  exceed today's limits.
 - Desktop-first: tested at 1280px and 1024px widths. Phone layouts are not optimized.
 
 ## Environment variables

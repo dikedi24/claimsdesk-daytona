@@ -295,7 +295,11 @@ function DrillDown({ s, dept, label, date, fromYear }: { s: AppState; dept: stri
 function TrendReport({ s }: { s: AppState }) {
   const [metric, setMetric] = useState<YearMetric>("claims");
   const [mode, setMode] = useState<"bar" | "line">("bar");
-  const data = useMemo(() => claimsByYear(s, metric), [s, metric]);
+  const [legacyHistory, setLegacyHistory] = useState(false);
+  const hasLegacy = s.legacyCount > 0;
+  const showLegacy = hasLegacy && legacyHistory;
+  // Default range is the current system (2021–2026); legacy years are opt-in.
+  const data = useMemo(() => claimsByYear(s, metric).filter((d) => showLegacy || d.year >= 2021), [s, metric, showLegacy]);
   const isMoney = metric === "incurred";
   const title = `${isMoney ? "Total incurred" : "Claims reported"} by year of loss, WC vs GL`;
 
@@ -338,8 +342,21 @@ function TrendReport({ s }: { s: AppState }) {
               Line
             </button>
           </div>
-          <p className="text-sm text-slate-700">{title}. Incurred is as of today.</p>
+          <label className={`flex items-center gap-1.5 text-sm ${hasLegacy ? "" : "text-slate-500"}`}>
+            <input type="checkbox" checked={showLegacy} disabled={!hasLegacy} onChange={(e) => setLegacyHistory(e.target.checked)} aria-describedby="legacy-history-help" />
+            Include legacy history (2006–2020)
+          </label>
+          <p className="text-sm text-slate-700">
+            {title}, {data[0]?.year ?? 2021}–{data[data.length - 1]?.year ?? 2026}. Incurred is as of today.
+          </p>
         </div>
+        <p id="legacy-history-help" className="-mt-1 mb-3 text-xs text-slate-600">
+          {!hasLegacy
+            ? "Legacy history becomes available after the Risk Manager approves the legacy conversion."
+            : showLegacy
+              ? "Legacy rows reflect the City's stated 16,000-record count from the old system."
+              : null}
+        </p>
         <Chart
           data={data}
           series={SERIES}

@@ -7,6 +7,9 @@ import { BODY_PARTS, CAUSES, DAMAGE_TYPES, DEPARTMENTS } from "@/lib/codes";
 import { TODAY } from "@/lib/dates";
 import { extractionSchema, ruleParse, validateExtraction, type ExtractResponse } from "@/lib/intake";
 
+// Let Vercel run the function long enough for the SDK's 30s timeout plus its one retry.
+export const maxDuration = 60;
+
 const MAX_CHARS = 20_000;
 const codeList = (list: { code: string; label: string }[]) => list.map((c) => `${c.code} = ${c.label}`).join("; ");
 

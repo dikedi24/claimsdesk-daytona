@@ -146,6 +146,14 @@ const ROWS: Row[] = [
     production: "Complete export of all claim data, history and attached documents in native formats (CSV and a SQL Server–compatible database copy) with a data dictionary.",
   },
   {
+    area: "Root claims with sub-claims / additional claimants",
+    ref: "3.3D, 3.4D",
+    status: "Roadmap",
+    demo: "Not in the demo; each claim has one claimant.",
+    production:
+      "Discovery would confirm how the legacy system stores suffix claims, which may explain why the 16,000-record count exceeds the City's ~258 claims/year.",
+  },
+  {
     area: "Recurring payment schedules",
     ref: "3.11",
     status: "Roadmap",

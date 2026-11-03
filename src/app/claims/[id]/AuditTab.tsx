@@ -4,7 +4,9 @@ import { Card, rowCls, tableCls, td, th, theadCls } from "@/components/ui";
 import { fmtDateTime, money, moneyCents } from "@/lib/format";
 import type { AppState } from "@/lib/store";
 import type { Claim, Role } from "@/lib/types";
-import { roleLabel, userName } from "@/lib/users";
+import { USERS, roleLabel, userName } from "@/lib/users";
+
+const roleOf = (userId: string): Role => USERS.find((u) => u.id === userId)?.role ?? "supervisor";
 
 interface Row {
   key: string;
@@ -37,6 +39,17 @@ export default function AuditTab({ s, claim }: { s: AppState; claim: Claim }) {
       details: `${claim.type} claim set up; assigned to ${userName(claim.adjusterId)}.`,
       history: true,
     });
+    // Claim total reserve after each approved change (authority is checked on the claim total).
+    const totalAfter = new Map<string, number>();
+    const bal = { Medical: 0, Indemnity: 0, Expense: 0 };
+    (s.reservesByClaim.get(claim.id) ?? [])
+      .map((r, i) => ({ r, i }))
+      .filter(({ r }) => r.status === "Approved")
+      .sort((a, b) => a.r.date.localeCompare(b.r.date) || a.i - b.i)
+      .forEach(({ r }) => {
+        bal[r.category] = r.newBalance;
+        totalAfter.set(r.id, bal.Medical + bal.Indemnity + bal.Expense);
+      });
     for (const r of s.reservesByClaim.get(claim.id) ?? []) {
       if (isUserCreated(r.id)) continue;
       rows.push({
@@ -48,6 +61,18 @@ export default function AuditTab({ s, claim }: { s: AppState; claim: Claim }) {
         details: `${r.category} reserve set to ${money(r.newBalance)} (${r.amount >= 0 ? "+" : "−"}${money(Math.abs(r.amount))}). ${r.reason}.`,
         history: true,
       });
+      if (r.historicalApproval && r.decidedBy)
+        rows.push({
+          key: r.id + "-appr",
+          when: r.date,
+          userId: r.decidedBy,
+          role: roleOf(r.decidedBy),
+          action: "Reserve change approved",
+          details: `${r.category} reserve to ${money(r.newBalance)}; claim total reserve ${money(totalAfter.get(r.id) ?? r.newBalance)} exceeded the ${
+            r.decidedBy === "u-rm" ? "Supervisor's" : "adjuster's"
+          } reserve authority. Requested by ${userName(r.byUserId)}.`,
+          history: true,
+        });
     }
     for (const p of s.paymentsByClaim.get(claim.id) ?? []) {
       if (isUserCreated(p.id)) continue;
@@ -60,6 +85,16 @@ export default function AuditTab({ s, claim }: { s: AppState; claim: Claim }) {
         details: `${moneyCents(p.amount)} ${p.category} to ${p.payee}.`,
         history: true,
       });
+      if (p.historicalApproval && p.approvedBy)
+        rows.push({
+          key: p.id + "-appr",
+          when: p.issuedDate ?? p.requestedDate,
+          userId: p.approvedBy,
+          role: roleOf(p.approvedBy),
+          action: "Payment approved",
+          details: `${moneyCents(p.amount)} ${p.category} to ${p.payee} exceeded the ${p.approvedBy === "u-rm" ? "Supervisor's" : "adjuster's"} payment authority.`,
+          history: true,
+        });
       if (p.issuedDate)
         rows.push({
           key: p.id + "-iss",
