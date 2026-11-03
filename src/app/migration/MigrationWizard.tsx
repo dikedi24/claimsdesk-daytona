@@ -1,5 +1,6 @@
 "use client";
 // Legacy migration: select file → map fields → validate → conversion report → approve [3.2D, 3.21].
+// Conversion is "without loss of data": rows that fail validation are held for correction, never discarded.
 import Link from "next/link";
 import Papa from "papaparse";
 import { useState } from "react";
@@ -19,18 +20,22 @@ import {
   th,
   theadCls,
 } from "@/components/ui";
-import { approveConversion, rollbackConversion, type Result } from "@/lib/actions";
+import { approveConversion, correctLegacyRow, correctionOutcome, rollbackConversion, type Result } from "@/lib/actions";
 import { DEPARTMENTS, deptLabel } from "@/lib/codes";
 import { fmtDate, count, moneyCents } from "@/lib/format";
 import {
   DEPT_XWALK,
+  FIELDS_FOR_RULE,
   TARGET_FIELDS,
   autoMap,
   convert,
   exceptionRows,
   missingRequired,
+  summaryLine,
   tieOut,
   type ConversionResult,
+  type Corrections,
+  type HeldRow,
   type Issue,
   type Mapping,
   type TargetKey,
@@ -56,6 +61,7 @@ export default function MigrationWizard() {
   const [mapping, setMapping] = useState<Mapping>({});
   const [autoMapping, setAutoMapping] = useState<Mapping>({});
   const [result, setResult] = useState<ConversionResult | null>(null);
+  const [corrections, setCorrections] = useState<Corrections>({});
   const [convertMs, setConvertMs] = useState(0);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<Result | null>(null);
@@ -68,6 +74,7 @@ export default function MigrationWizard() {
     setMapping(auto);
     setAutoMapping(auto);
     setResult(null);
+    setCorrections({});
     setMessage(null);
     setStep(1);
   };
@@ -111,15 +118,26 @@ export default function MigrationWizard() {
   const validate = () => {
     if (!file) return;
     const t = performance.now();
-    setResult(convert(file.rows, mapping));
+    setResult(convert(file.rows, mapping, corrections));
     setConvertMs(performance.now() - t);
     setStep(2);
+  };
+
+  // Pre-approval fix of a held row: apply the correction and re-run validation [3.2D].
+  const correct = (line: number, fix: Record<string, string>): Result => {
+    if (!file) return { ok: false, error: "No file loaded." };
+    if (s.role !== "risk_manager") return { ok: false, error: "Only the Risk Manager can correct held rows." };
+    const next = { ...corrections, [line]: { ...corrections[line], ...fix } };
+    const r = convert(file.rows, mapping, next);
+    setCorrections(next);
+    setResult(r);
+    return correctionOutcome(r, line);
   };
 
   const approve = () => {
     if (!file || !result) return;
     if (!window.confirm(`Approve conversion of ${count(result.converted.length)} claims from ${file.name}?`)) return;
-    const r = approveConversion(result, mapping, file.name, file.bundled);
+    const r = approveConversion(result, file.rows, mapping, corrections, file.name, file.bundled);
     setMessage(r);
     if (r.ok) {
       setFile(null);
@@ -128,13 +146,27 @@ export default function MigrationWizard() {
     }
   };
 
-  // Once approved, show the decision instead of the wizard (unless a new run has been started).
+  // Once approved, show the decision and the remaining correction queue (unless a new run has been started).
   if (s.migration && !file) {
     return (
-      <div className="max-w-5xl space-y-5">
+      <div className="max-w-6xl space-y-5">
         <PageTitle title="Legacy Data Migration" subtitle="Conversion of historical claims from the City's legacy SQL Server system." />
         <ResultMessage result={message} />
         <ApprovedSummary s={s} onRollback={() => setMessage(rollbackConversion())} />
+        {s.legacyResult && s.legacyRows && (
+          <>
+            <ControlTotals result={s.legacyResult} />
+            <ExceptionsCard
+              s={s}
+              result={s.legacyResult}
+              rows={s.legacyRows}
+              mapping={s.migration.mapping}
+              corrections={s.migration.corrections ?? {}}
+              fileName={s.migration.fileName}
+              onCorrect={correctLegacyRow}
+            />
+          </>
+        )}
       </div>
     );
   }
@@ -143,7 +175,7 @@ export default function MigrationWizard() {
     <div className="max-w-6xl space-y-5">
       <PageTitle
         title="Legacy Data Migration"
-        subtitle="Convert the ~16,000 historical claims in the City's legacy SQL Server system. Nothing is converted until the Risk Manager approves the conversion report."
+        subtitle="Convert the ~16,000 historical claims in the City's legacy SQL Server system without loss of data. Nothing is converted until the Risk Manager approves the conversion report."
       />
 
       <ol className="flex flex-wrap gap-2" aria-label="Migration steps">
@@ -174,7 +206,18 @@ export default function MigrationWizard() {
       {step === 2 && file && result && (
         <ValidateStep file={file} result={result} ms={file.parseMs + convertMs} onBack={() => setStep(1)} onNext={() => setStep(3)} />
       )}
-      {step === 3 && file && result && <ReportStep s={s} file={file} result={result} onBack={() => setStep(2)} onApprove={approve} />}
+      {step === 3 && file && result && (
+        <ReportStep
+          s={s}
+          file={file}
+          result={result}
+          mapping={mapping}
+          corrections={corrections}
+          onCorrect={correct}
+          onBack={() => setStep(2)}
+          onApprove={approve}
+        />
+      )}
     </div>
   );
 }
@@ -240,10 +283,11 @@ function MapStep({
   // Department code crosswalk with counts of each legacy code found in the file.
   const deptCol = Object.entries(mapping).find(([, t]) => t === "department")?.[0];
   const deptCounts = new Map<string, number>();
-  if (deptCol) for (const r of file.rows) {
-    const v = (r[deptCol] ?? "").trim().toUpperCase();
-    deptCounts.set(v, (deptCounts.get(v) ?? 0) + 1);
-  }
+  if (deptCol)
+    for (const r of file.rows) {
+      const v = (r[deptCol] ?? "").trim().toUpperCase();
+      deptCounts.set(v, (deptCounts.get(v) ?? 0) + 1);
+    }
   const deptRows = [...deptCounts.entries()].sort((a, b) => b[1] - a[1]);
 
   return (
@@ -314,7 +358,9 @@ function MapStep({
 
       {deptCol && (
         <Card title="Department code crosswalk">
-          <p className="mb-3 text-sm text-slate-700">How legacy department codes translate to City departments. Unknown codes convert as “Unassigned” and are listed as exceptions.</p>
+          <p className="mb-3 text-sm text-slate-700">
+            How legacy department codes translate to City departments. Unknown codes convert as “Unassigned” and are listed as exceptions.
+          </p>
           <table className={`${tableCls} max-w-2xl`}>
             <thead className={theadCls}>
               <tr>
@@ -365,7 +411,7 @@ function ValidateStep({ file, result, ms, onBack, onNext }: { file: SourceFile; 
   const example = (rule: string): Issue | undefined =>
     result.duplicates.find((x) => x.rule === rule) ??
     result.mappingExceptions.find((x) => x.rule === rule) ??
-    result.rejected.find((x) => x.reasons.includes(rule));
+    result.held.find((x) => x.reasons.includes(rule));
   const rules = Object.entries(result.ruleCounts).sort((a, b) => b[1] - a[1]);
 
   return (
@@ -373,7 +419,8 @@ function ValidateStep({ file, result, ms, onBack, onNext }: { file: SourceFile; 
       <Card title="Validation results">
         <p className="mb-3 text-sm text-slate-700">
           Checked {count(file.rows.length)} rows in {(ms / 1000).toFixed(2)} seconds. <strong>{count(result.converted.length)}</strong> rows are ready to
-          convert, {count(result.rejected.length)} need correction, and {count(result.duplicates.length)} are duplicates.
+          convert, {count(result.held.length)} will be held for correction (kept, not discarded), and {count(result.duplicates.length)} are
+          duplicates.
         </p>
         <table className={tableCls}>
           <thead className={theadCls}>
@@ -387,13 +434,13 @@ function ValidateStep({ file, result, ms, onBack, onNext }: { file: SourceFile; 
           <tbody>
             {rules.map(([rule, n]) => {
               const ex = example(rule);
-              const outcome = OUTCOME[rule] ?? "Rejected — fix in source and re-run";
+              const outcome = OUTCOME[rule] ?? "Held for correction";
               return (
                 <tr key={rule} className={rowCls}>
                   <td className={`${td} font-medium`}>{rule}</td>
                   <td className={`${td} text-right tabular-nums`}>{count(n)}</td>
                   <td className={td}>
-                    <span className={outcome.startsWith("Rejected") ? "text-red-800" : outcome.startsWith("Excluded") ? "text-slate-800" : "text-amber-900"}>
+                    <span className={outcome.startsWith("Held") ? "text-red-800" : outcome.startsWith("Excluded") ? "text-slate-800" : "text-amber-900"}>
                       {outcome}
                     </span>
                   </td>
@@ -428,190 +475,49 @@ function ValidateStep({ file, result, ms, onBack, onNext }: { file: SourceFile; 
 
 const PAGE = 25;
 
-function ReportStep({ s, file, result, onBack, onApprove }: { s: AppState; file: SourceFile; result: ConversionResult; onBack: () => void; onApprove: () => void }) {
-  const [tab, setTab] = useState<"rejected" | "duplicates" | "mapping">("rejected");
-  const [page, setPage] = useState(0);
-  const t = result.totals;
-  const diff = tieOut(t);
+function ReportStep({
+  s,
+  file,
+  result,
+  mapping,
+  corrections,
+  onCorrect,
+  onBack,
+  onApprove,
+}: {
+  s: AppState;
+  file: SourceFile;
+  result: ConversionResult;
+  mapping: Mapping;
+  corrections: Corrections;
+  onCorrect: (line: number, fix: Record<string, string>) => Result;
+  onBack: () => void;
+  onApprove: () => void;
+}) {
+  const diff = tieOut(result.totals);
   const ties = Object.values(diff).every((v) => v === 0);
   const isRM = s.role === "risk_manager";
-  const lists = { rejected: result.rejected, duplicates: result.duplicates, mapping: result.mappingExceptions };
-  const list: Issue[] = lists[tab];
-  const pages = Math.max(1, Math.ceil(list.length / PAGE));
-
-  const download = () => {
-    const csv = Papa.unparse(exceptionRows(result));
-    const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `conversion_exceptions_${file.name.replace(/\.csv$/i, "")}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
-
-  const expected: Totals = {
-    rows: t.source.rows - t.duplicates.rows - t.rejected.rows,
-    paid: t.source.paid - t.duplicates.paid - t.rejected.paid,
-    outstanding: t.source.outstanding - t.duplicates.outstanding - t.rejected.outstanding,
-    incurred: t.source.incurred - t.duplicates.incurred - t.rejected.incurred,
-  };
-  const line = (label: string, x: Totals, sign = "", strong = false) => (
-    <tr className={`${rowCls} ${strong ? "font-semibold" : ""}`}>
-      <th scope="row" className={`${td} text-left font-normal ${strong ? "font-semibold" : ""}`}>
-        {label}
-      </th>
-      <td className={`${td} text-right tabular-nums`}>
-        {sign}
-        {count(x.rows)}
-      </td>
-      <td className={`${td} text-right tabular-nums`}>
-        {sign}
-        {moneyCents(x.paid)}
-      </td>
-      <td className={`${td} text-right tabular-nums`}>
-        {sign}
-        {moneyCents(x.outstanding)}
-      </td>
-      <td className={`${td} text-right tabular-nums`}>
-        {sign}
-        {moneyCents(x.incurred)}
-      </td>
-    </tr>
-  );
 
   return (
     <div className="space-y-4">
+      <SummaryBanner result={result} />
       <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
-        <Stat label="Source records" value={t.source.rows} />
-        <Stat label="Converted" value={t.converted.rows} tone="green" />
-        <Stat label="Rejected (need correction)" value={t.rejected.rows} tone="red" />
-        <Stat label="Duplicates excluded" value={t.duplicates.rows} />
-        <Stat label="Converted with exceptions" value={new Set(result.mappingExceptions.map((m) => m.row)).size} tone="amber" />
+        <Stat label="Source records" value={result.totals.source.rows} />
+        <Stat label="Converted" value={result.converted.length} tone="green" />
+        <Stat label="Held for correction" value={result.held.length} tone="amber" />
+        <Stat label="Duplicates excluded" value={result.duplicates.length} />
+        <Stat label="Records lost" value={diff.rows} tone={diff.rows === 0 ? "green" : "red"} />
       </div>
 
-      <Card title="Financial control totals">
-        <div
-          role="status"
-          className={`mb-3 rounded border px-3 py-2 text-sm font-semibold ${
-            ties ? "border-green-300 bg-green-50 text-green-900" : "border-red-300 bg-red-50 text-red-900"
-          }`}
-        >
-          {ties
-            ? "✓ Ties out: every source record and dollar is accounted for (converted, rejected or excluded as a duplicate)."
-            : "✗ Does not tie out: investigate the differences below before approving."}
-        </div>
-        <div className="overflow-x-auto">
-          <table className={tableCls}>
-            <thead className={theadCls}>
-              <tr>
-                <th className={th}></th>
-                <th className={`${th} text-right`}>Records</th>
-                <th className={`${th} text-right`}>Total paid</th>
-                <th className={`${th} text-right`}>Outstanding reserve</th>
-                <th className={`${th} text-right`}>Total incurred</th>
-              </tr>
-            </thead>
-            <tbody>
-              {line("Source file", t.source, "", true)}
-              {line("Less: duplicates excluded", t.duplicates, "− ")}
-              {line("Less: rejected rows", t.rejected, "− ")}
-              {line("Expected in ClaimsDesk", expected, "", true)}
-              {line("Actually converted (summed from converted claims)", t.converted, "", true)}
-              <tr className="border-t-2 border-slate-300 font-semibold">
-                <th scope="row" className={`${td} text-left`}>
-                  Difference
-                </th>
-                {(["rows", "paid", "outstanding", "incurred"] as const).map((k) => (
-                  <td key={k} className={`${td} text-right tabular-nums ${diff[k] === 0 ? "text-green-800" : "text-red-800"}`}>
-                    {k === "rows" ? count(diff[k]) : moneyCents(diff[k])} {diff[k] === 0 ? "✓" : "✗"}
-                  </td>
-                ))}
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </Card>
+      <ControlTotals result={result} />
 
-      <Card
-        title="Exceptions"
-        action={
-          <button type="button" className={btnSecondary} onClick={download}>
-            Download exceptions (CSV)
-          </button>
-        }
-      >
-        <div role="tablist" aria-label="Exception lists" className="mb-3 flex flex-wrap gap-1">
-          {(
-            [
-              ["rejected", `Rejected rows (${count(result.rejected.length)})`],
-              ["duplicates", `Duplicates (${count(result.duplicates.length)})`],
-              ["mapping", `Mapping exceptions (${count(result.mappingExceptions.length)})`],
-            ] as const
-          ).map(([k, label]) => (
-            <button
-              key={k}
-              role="tab"
-              aria-selected={tab === k}
-              className={`rounded border px-3 py-1 text-sm ${tab === k ? "border-[#0b3a5b] bg-[#0b3a5b] font-semibold text-white" : "border-slate-300 hover:bg-slate-100"}`}
-              onClick={() => {
-                setTab(k);
-                setPage(0);
-              }}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-        {result.unmappedColumns.length > 0 && tab === "mapping" && (
-          <p className="mb-2 text-sm text-slate-700">
-            Columns not converted (kept in the legacy archive): <span className="font-mono">{result.unmappedColumns.join(", ")}</span>
-          </p>
-        )}
-        <div role="tabpanel" className="overflow-x-auto">
-          {list.length === 0 ? (
-            <p className="text-sm text-slate-600">None.</p>
-          ) : (
-            <table className={tableCls}>
-              <thead className={theadCls}>
-                <tr>
-                  <th className={th}>Line</th>
-                  <th className={th}>Legacy claim</th>
-                  <th className={th}>Issue</th>
-                  <th className={th}>Detail</th>
-                </tr>
-              </thead>
-              <tbody>
-                {list.slice(page * PAGE, page * PAGE + PAGE).map((x) => (
-                  <tr key={`${x.row}-${x.rule}`} className={rowCls}>
-                    <td className={`${td} tabular-nums`}>{x.row}</td>
-                    <td className={`${td} font-mono text-xs`}>{x.claimNumber || "—"}</td>
-                    <td className={td}>{x.rule}</td>
-                    <td className={`${td} text-slate-700`}>{x.detail}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
-        {pages > 1 && (
-          <nav aria-label="Exception pages" className="mt-2 flex items-center gap-3 text-sm">
-            <button type="button" className={btnSecondary} disabled={page === 0} onClick={() => setPage(page - 1)}>
-              Previous
-            </button>
-            <span>
-              Page {page + 1} of {pages}
-            </span>
-            <button type="button" className={btnSecondary} disabled={page >= pages - 1} onClick={() => setPage(page + 1)}>
-              Next
-            </button>
-          </nav>
-        )}
-      </Card>
+      <ExceptionsCard s={s} result={result} rows={file.rows} mapping={mapping} corrections={corrections} fileName={file.name} onCorrect={onCorrect} />
 
       <Card title="Approve conversion">
         <p className="mb-3 text-sm text-slate-700">
           Approving loads {count(result.converted.length)} converted historical claims into ClaimsDesk, where they appear in search and reports as
-          closed, read-only claims. Rejected rows stay in the exceptions list for correction and a later re-run.
+          closed, read-only claims. The {count(result.held.length)} rows held for correction are not discarded: they stay in the correction queue,
+          and the Risk Manager can fix and convert them before or after approval.
           {!file.bundled && " Because this is an uploaded file, converted claims last only until the page is reloaded in this demo."}
         </p>
         {s.migration && (
@@ -631,6 +537,345 @@ function ReportStep({ s, file, result, onBack, onApprove }: { s: AppState; file:
         </div>
       </Card>
     </div>
+  );
+}
+
+/** "15,390 converted · 370 held for correction · 240 duplicates excluded · 0 records lost" */
+function SummaryBanner({ result }: { result: ConversionResult }) {
+  const lost = tieOut(result.totals).rows;
+  return (
+    <p
+      role="status"
+      className={`rounded border px-4 py-3 text-base font-semibold ${
+        lost === 0 ? "border-green-300 bg-green-50 text-green-950" : "border-red-300 bg-red-50 text-red-950"
+      }`}
+    >
+      {summaryLine(result)}
+    </p>
+  );
+}
+
+/** Source total = Converted + Held for correction + Duplicates excluded, per column [3.2D]. */
+function ControlTotals({ result }: { result: ConversionResult }) {
+  const t = result.totals;
+  const diff = tieOut(t);
+  const ties = Object.values(diff).every((v) => v === 0);
+  const hasCorrections = result.correctedRows.length > 0;
+  const accounted: Totals = {
+    rows: t.converted.rows + t.held.rows + t.duplicates.rows,
+    paid: t.converted.paid + t.held.paid + t.duplicates.paid,
+    outstanding: t.converted.outstanding + t.held.outstanding + t.duplicates.outstanding,
+    incurred: t.converted.incurred + t.held.incurred + t.duplicates.incurred,
+  };
+  const line = (label: string, x: Totals, opts: { strong?: boolean; rows?: string } = {}) => (
+    <tr className={`${rowCls} ${opts.strong ? "font-semibold" : ""}`}>
+      <th scope="row" className={`${td} text-left ${opts.strong ? "font-semibold" : "font-normal"}`}>
+        {label}
+      </th>
+      <td className={`${td} text-right tabular-nums`}>{opts.rows ?? count(x.rows)}</td>
+      <td className={`${td} text-right tabular-nums`}>{moneyCents(x.paid)}</td>
+      <td className={`${td} text-right tabular-nums`}>{moneyCents(x.outstanding)}</td>
+      <td className={`${td} text-right tabular-nums`}>{moneyCents(x.incurred)}</td>
+    </tr>
+  );
+  return (
+    <Card title="Financial control totals">
+      <div
+        role="status"
+        className={`mb-3 rounded border px-3 py-2 text-sm font-semibold ${
+          ties ? "border-green-300 bg-green-50 text-green-900" : "border-red-300 bg-red-50 text-red-900"
+        }`}
+      >
+        {ties
+          ? "✓ Ties out: every source record and dollar is accounted for as converted, held for correction, or an excluded duplicate."
+          : "✗ Does not tie out: investigate the differences below before approving."}
+      </div>
+      <div className="overflow-x-auto">
+        <table className={tableCls}>
+          <thead className={theadCls}>
+            <tr>
+              <th className={th}></th>
+              <th className={`${th} text-right`}>Records</th>
+              <th className={`${th} text-right`}>Total paid</th>
+              <th className={`${th} text-right`}>Outstanding reserve</th>
+              <th className={`${th} text-right`}>Total incurred</th>
+            </tr>
+          </thead>
+          <tbody>
+            {line("Source file (as received)", t.source, { strong: true })}
+            {hasCorrections && line(`Net change from Risk Manager corrections (${count(t.corrections.rows)} rows)`, t.corrections, { rows: "—" })}
+            {line("Converted into ClaimsDesk", t.converted)}
+            {line("Held for correction (kept in queue)", t.held)}
+            {line("Duplicates excluded", t.duplicates)}
+            {line("Total accounted for", accounted, { strong: true })}
+            <tr className="border-t-2 border-slate-300 font-semibold">
+              <th scope="row" className={`${td} text-left`}>
+                Difference
+              </th>
+              {(["rows", "paid", "outstanding", "incurred"] as const).map((k) => (
+                <td key={k} className={`${td} text-right tabular-nums ${diff[k] === 0 ? "text-green-800" : "text-red-800"}`}>
+                  {k === "rows" ? count(diff[k]) : moneyCents(diff[k])} {diff[k] === 0 ? "✓" : "✗"}
+                </td>
+              ))}
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p className="mt-2 text-xs text-slate-600">
+        Source total{hasCorrections ? " + corrections" : ""} = Converted + Held for correction + Duplicates excluded. Converted totals are summed from
+        the converted claims themselves.
+      </p>
+    </Card>
+  );
+}
+
+/** Held-for-correction queue (with inline fix for the Risk Manager), duplicates, and mapping exceptions. */
+function ExceptionsCard({
+  s,
+  result,
+  rows,
+  mapping,
+  corrections,
+  fileName,
+  onCorrect,
+}: {
+  s: AppState;
+  result: ConversionResult;
+  rows: Record<string, string>[];
+  mapping: Mapping;
+  corrections: Corrections;
+  fileName: string;
+  onCorrect: (line: number, fix: Record<string, string>) => Result;
+}) {
+  const [tab, setTab] = useState<"held" | "duplicates" | "mapping">("held");
+  const [page, setPage] = useState(0);
+  const [fixing, setFixing] = useState<number | null>(null);
+  const [message, setMessage] = useState<Result | null>(null);
+  const lists = { held: result.held, duplicates: result.duplicates, mapping: result.mappingExceptions };
+  const list: Issue[] = lists[tab];
+  const pages = Math.max(1, Math.ceil(list.length / PAGE));
+  const current = Math.min(page, pages - 1); // stay in range as rows leave the queue
+  const canFix = s.role === "risk_manager";
+
+  const download = () => {
+    const csv = Papa.unparse(exceptionRows(result));
+    const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `conversion_exceptions_${fileName.replace(/\.csv$/i, "")}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  return (
+    <Card
+      title="Exceptions queue"
+      action={
+        <button type="button" className={btnSecondary} onClick={download}>
+          Download exceptions (CSV)
+        </button>
+      }
+    >
+      <ResultMessage result={message} />
+      <div role="tablist" aria-label="Exception lists" className="my-3 flex flex-wrap gap-1">
+        {(
+          [
+            ["held", `Held for correction (${count(result.held.length)})`],
+            ["duplicates", `Duplicates excluded (${count(result.duplicates.length)})`],
+            ["mapping", `Mapping exceptions (${count(result.mappingExceptions.length)})`],
+          ] as const
+        ).map(([k, label]) => (
+          <button
+            key={k}
+            role="tab"
+            aria-selected={tab === k}
+            className={`rounded border px-3 py-1 text-sm ${
+              tab === k ? "border-[#0b3a5b] bg-[#0b3a5b] font-semibold text-white" : "border-slate-300 hover:bg-slate-100"
+            }`}
+            onClick={() => {
+              setTab(k);
+              setPage(0);
+              setFixing(null);
+            }}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      {tab === "held" && (
+        <p className="mb-2 text-sm text-slate-700">
+          These rows are kept, not discarded.{" "}
+          {canFix
+            ? "Fix a value and re-validate: if the row passes, it converts immediately."
+            : "Only the Risk Manager can correct held rows."}
+          {result.correctedRows.length > 0 && ` ${count(result.correctedRows.length)} row(s) corrected so far.`}
+        </p>
+      )}
+      {tab === "mapping" && result.unmappedColumns.length > 0 && (
+        <p className="mb-2 text-sm text-slate-700">
+          Columns not converted (kept in the legacy archive): <span className="font-mono">{result.unmappedColumns.join(", ")}</span>
+        </p>
+      )}
+      <div role="tabpanel" className="overflow-x-auto">
+        {list.length === 0 ? (
+          <p className="text-sm text-slate-600">{tab === "held" ? "No rows are held. Every valid record has converted." : "None."}</p>
+        ) : (
+          <table className={tableCls}>
+            <thead className={theadCls}>
+              <tr>
+                <th className={th}>Line</th>
+                <th className={th}>Legacy claim</th>
+                <th className={th}>Issue</th>
+                <th className={th}>Detail</th>
+                {tab === "held" && canFix && <th className={th}>Action</th>}
+              </tr>
+            </thead>
+            <tbody>
+              {list.slice(current * PAGE, current * PAGE + PAGE).map((x) => (
+                <IssueRow
+                  key={`${x.row}-${x.rule}`}
+                  issue={x}
+                  held={tab === "held" ? (x as HeldRow) : null}
+                  canFix={canFix}
+                  open={fixing === x.row}
+                  onToggle={() => setFixing(fixing === x.row ? null : x.row)}
+                  row={rows[x.row - 2]}
+                  mapping={mapping}
+                  corrections={corrections}
+                  onSubmit={(fix) => {
+                    const r = onCorrect(x.row, fix);
+                    setMessage(r);
+                    if (r.ok) setFixing(null);
+                  }}
+                />
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+      {pages > 1 && (
+        <nav aria-label="Exception pages" className="mt-2 flex items-center gap-3 text-sm">
+          <button type="button" className={btnSecondary} disabled={current === 0} onClick={() => setPage(current - 1)}>
+            Previous
+          </button>
+          <span>
+            Page {current + 1} of {pages}
+          </span>
+          <button type="button" className={btnSecondary} disabled={current >= pages - 1} onClick={() => setPage(current + 1)}>
+            Next
+          </button>
+        </nav>
+      )}
+    </Card>
+  );
+}
+
+function IssueRow({
+  issue,
+  held,
+  canFix,
+  open,
+  onToggle,
+  row,
+  mapping,
+  corrections,
+  onSubmit,
+}: {
+  issue: Issue;
+  held: HeldRow | null;
+  canFix: boolean;
+  open: boolean;
+  onToggle: () => void;
+  row: Record<string, string> | undefined;
+  mapping: Mapping;
+  corrections: Corrections;
+  onSubmit: (fix: Record<string, string>) => void;
+}) {
+  const showAction = !!held && canFix;
+  return (
+    <>
+      <tr className={rowCls}>
+        <td className={`${td} tabular-nums`}>{issue.row}</td>
+        <td className={`${td} font-mono text-xs`}>{issue.claimNumber || "—"}</td>
+        <td className={td}>{issue.rule}</td>
+        <td className={`${td} text-slate-700`}>{issue.detail}</td>
+        {showAction && (
+          <td className={td}>
+            <button type="button" className={btnSecondary} aria-expanded={open} onClick={onToggle}>
+              {open ? "Cancel" : "Fix"}
+            </button>
+          </td>
+        )}
+      </tr>
+      {showAction && open && row && (
+        <tr className="bg-amber-50/60">
+          <td colSpan={5} className="px-3 py-3">
+            <FixForm held={held!} row={row} mapping={mapping} current={corrections[issue.row] ?? {}} onSubmit={onSubmit} />
+          </td>
+        </tr>
+      )}
+    </>
+  );
+}
+
+/** Inline correction of the source values behind a held row's reasons. */
+function FixForm({
+  held,
+  row,
+  mapping,
+  current,
+  onSubmit,
+}: {
+  held: HeldRow;
+  row: Record<string, string>;
+  mapping: Mapping;
+  current: Record<string, string>;
+  onSubmit: (fix: Record<string, string>) => void;
+}) {
+  const colFor = (k: TargetKey) => Object.entries(mapping).find(([, t]) => t === k)?.[0];
+  const keys = [...new Set(held.reasons.flatMap((r) => FIELDS_FOR_RULE[r] ?? []))];
+  const fields = keys
+    .map((k) => ({ key: k, col: colFor(k), label: TARGET_FIELDS.find((f) => f.key === k)!.label }))
+    .filter((f): f is { key: TargetKey; col: string; label: string } => !!f.col);
+  const [values, setValues] = useState<Record<string, string>>(() => Object.fromEntries(fields.map((f) => [f.col, current[f.col] ?? row[f.col] ?? ""])));
+
+  return (
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        onSubmit(values);
+      }}
+      className="space-y-2"
+    >
+      <p className="text-sm font-semibold text-slate-800">
+        Correct line {held.row} ({held.claimNumber || "no claim number"}): {held.detail}
+      </p>
+      <div className="flex flex-wrap items-end gap-3">
+        {fields.map((f) => (
+          <div key={f.col} className="flex flex-col">
+            <label htmlFor={`fix-${held.row}-${f.col}`} className="text-xs font-semibold text-slate-700">
+              {f.label} <span className="font-mono font-normal text-slate-500">({f.col})</span>
+            </label>
+            <input
+              id={`fix-${held.row}-${f.col}`}
+              className={`${inputCls} w-56`}
+              value={values[f.col]}
+              onChange={(e) => setValues({ ...values, [f.col]: e.target.value })}
+              aria-describedby={`was-${held.row}-${f.col}`}
+            />
+            <span id={`was-${held.row}-${f.col}`} className="text-xs text-slate-500">
+              In source file: {row[f.col] ? <span className="font-mono">{row[f.col]}</span> : "(blank)"}
+            </span>
+          </div>
+        ))}
+        <button type="submit" className={btnPrimary}>
+          Save and re-validate
+        </button>
+      </div>
+      <p className="text-xs text-slate-600">
+        The source file is not changed. The correction is recorded in the audit trail and applied whenever the conversion runs.
+      </p>
+    </form>
   );
 }
 
@@ -665,9 +910,14 @@ function ApprovedSummary({ s, onRollback }: { s: AppState; onRollback: () => voi
         </div>
         <div>
           <dt className="text-xs font-semibold uppercase text-slate-500">Claims converted</dt>
-          <dd>{count(m.converted)}</dd>
+          <dd>{count(s.legacyResult?.converted.length ?? m.converted)}</dd>
         </div>
       </dl>
+      {s.legacyResult && (
+        <div className="mt-3">
+          <SummaryBanner result={s.legacyResult} />
+        </div>
+      )}
       <p className="mt-3 text-sm text-slate-700">
         {s.legacyStatus === "loading"
           ? "Loading converted claims…"

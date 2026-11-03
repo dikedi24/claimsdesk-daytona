@@ -99,15 +99,39 @@ export interface Totals {
   incurred: number;
 }
 
+/** A source row that failed validation. It is never discarded: it waits in the correction queue [3.2D]. */
+export type HeldRow = Issue & { reasons: string[] };
+
 export interface ConversionResult {
   converted: Claim[];
-  rejected: (Issue & { reasons: string[] })[];
+  held: HeldRow[];
   duplicates: Issue[];
   mappingExceptions: Issue[];
   unmappedColumns: string[];
   ruleCounts: Record<string, number>;
-  totals: { source: Totals; duplicates: Totals; rejected: Totals; converted: Totals };
+  correctedRows: number[]; // source lines with Risk Manager corrections applied
+  totals: {
+    source: Totals; // the file exactly as received
+    corrections: Totals; // net dollar effect of corrections (rows = number of corrected rows)
+    duplicates: Totals;
+    held: Totals;
+    converted: Totals;
+  };
 }
+
+/** Risk Manager corrections: source line number → { source column → corrected value }. */
+export type Corrections = Record<string, Record<string, string>>;
+
+/** Which ClaimsDesk fields a held row's reasons point at, so the fix form shows only those. */
+export const FIELDS_FOR_RULE: Record<string, TargetKey[]> = {
+  "Missing claim number": ["claimNumber"],
+  "Unknown claim type": ["type"],
+  "Missing claimant name": ["claimantLast", "claimantFirst"],
+  "Bad or impossible date": ["dateOfLoss", "dateReported", "closedDate"],
+  "Invalid amount": ["totalPaid", "outstandingReserve", "totalIncurred"],
+  "Negative paid amount": ["totalPaid", "totalIncurred"],
+  "Paid + reserve ≠ incurred": ["totalPaid", "outstandingReserve", "totalIncurred"],
+};
 
 const empty = (): Totals => ({ rows: 0, paid: 0, outstanding: 0, incurred: 0 });
 const add = (t: Totals, paid: number, os: number, inc: number) => {
@@ -142,30 +166,40 @@ function parseDate(v: string): { date?: string; error?: string } {
   return { date: iso };
 }
 
-export function convert(rows: Record<string, string>[], mapping: Mapping): ConversionResult {
+export function convert(rows: Record<string, string>[], mapping: Mapping, corrections: Corrections = {}): ConversionResult {
   const src: Partial<Record<TargetKey, string>> = {};
   for (const [h, t] of Object.entries(mapping)) if (t) src[t] = h;
   const get = (r: Record<string, string>, k: TargetKey) => (src[k] ? (r[src[k]!] ?? "").trim() : "");
 
   const res: ConversionResult = {
     converted: [],
-    rejected: [],
+    held: [],
     duplicates: [],
     mappingExceptions: [],
     unmappedColumns: Object.entries(mapping).filter(([, t]) => !t).map(([h]) => h),
     ruleCounts: {},
-    totals: { source: empty(), duplicates: empty(), rejected: empty(), converted: empty() },
+    correctedRows: [],
+    totals: { source: empty(), corrections: empty(), duplicates: empty(), held: empty(), converted: empty() },
   };
   const bump = (rule: string) => (res.ruleCounts[rule] = (res.ruleCounts[rule] ?? 0) + 1);
   const seen = new Map<string, number>();
 
-  rows.forEach((r, i) => {
+  rows.forEach((original, i) => {
     const line = i + 2;
+    const amounts = (x: Record<string, string>) =>
+      [num(get(x, "totalPaid")), num(get(x, "outstandingReserve")), num(get(x, "totalIncurred"))] as const;
+    const [p0, o0, i0] = amounts(original);
+    add(res.totals.source, safe(p0), safe(o0), safe(i0));
+
+    // Apply any Risk Manager corrections; track their dollar effect so totals still tie out.
+    const fix = corrections[line];
+    const r = fix ? { ...original, ...fix } : original;
+    const [paid, os, inc] = fix ? amounts(r) : [p0, o0, i0];
+    if (fix) {
+      res.correctedRows.push(line);
+      add(res.totals.corrections, safe(paid) - safe(p0), safe(os) - safe(o0), safe(inc) - safe(i0));
+    }
     const claimNumber = get(r, "claimNumber");
-    const paid = num(get(r, "totalPaid"));
-    const os = num(get(r, "outstandingReserve"));
-    const inc = num(get(r, "totalIncurred"));
-    add(res.totals.source, safe(paid), safe(os), safe(inc));
 
     // 1. Duplicates: keep the first occurrence of a claim number.
     if (claimNumber && seen.has(claimNumber)) {
@@ -176,7 +210,7 @@ export function convert(rows: Record<string, string>[], mapping: Mapping): Conve
     }
     if (claimNumber) seen.set(claimNumber, line);
 
-    // 2. Validation: anything here rejects the row.
+    // 2. Validation: anything here holds the row for correction (it is kept, not discarded).
     const reasons: { rule: string; detail: string }[] = [];
     if (!claimNumber) reasons.push({ rule: "Missing claim number", detail: "Claim number is blank" });
     const typeRaw = get(r, "type").toUpperCase();
@@ -209,8 +243,8 @@ export function convert(rows: Record<string, string>[], mapping: Mapping): Conve
     if (reasons.length) {
       const rules = [...new Set(reasons.map((x) => x.rule))];
       rules.forEach(bump);
-      res.rejected.push({ row: line, claimNumber, rule: rules.join("; "), detail: reasons.map((x) => x.detail).join("; "), reasons: rules });
-      add(res.totals.rejected, safe(paid), safe(os), safe(inc));
+      res.held.push({ row: line, claimNumber, rule: rules.join("; "), detail: reasons.map((x) => x.detail).join("; "), reasons: rules });
+      add(res.totals.held, safe(paid), safe(os), safe(inc));
       return;
     }
 
@@ -262,6 +296,7 @@ export function convert(rows: Record<string, string>[], mapping: Mapping): Conve
         paid: cents(paid),
         outstanding: cents(os),
         incurred: cents(inc),
+        corrected: !!fix,
       },
     };
     res.converted.push(claim);
@@ -277,18 +312,29 @@ export function convert(rows: Record<string, string>[], mapping: Mapping): Conve
   return res;
 }
 
-/** Differences between source and (converted + excluded); all zero means the conversion ties out. */
+/**
+ * Source (+ net corrections) − converted − held − duplicates, per column. All zero means every record
+ * and every dollar is accounted for. "rows" is the number of records lost (must be 0).
+ */
 export function tieOut(t: ConversionResult["totals"]) {
   const k = ["rows", "paid", "outstanding", "incurred"] as const;
   return Object.fromEntries(
-    k.map((f) => [f, cents(t.source[f] - t.converted[f] - t.duplicates[f] - t.rejected[f])]),
+    k.map((f) => [f, cents(t.source[f] + (f === "rows" ? 0 : t.corrections[f]) - t.converted[f] - t.duplicates[f] - t.held[f])]),
   ) as Record<(typeof k)[number], number>;
+}
+
+/** e.g. "15,390 converted · 370 held for correction · 240 duplicates excluded · 0 records lost" */
+export function summaryLine(r: ConversionResult) {
+  const n = (x: number) => x.toLocaleString("en-US");
+  return `${n(r.converted.length)} converted · ${n(r.held.length)} held for correction · ${n(r.duplicates.length)} duplicates excluded · ${n(
+    tieOut(r.totals).rows,
+  )} records lost`;
 }
 
 /** Rows for the exceptions CSV download. */
 export function exceptionRows(r: ConversionResult) {
   const rows = [
-    ...r.rejected.map((x) => ({ Line: x.row, ClaimNumber: x.claimNumber, Outcome: "Rejected", Rule: x.rule, Detail: x.detail })),
+    ...r.held.map((x) => ({ Line: x.row, ClaimNumber: x.claimNumber, Outcome: "Held for correction", Rule: x.rule, Detail: x.detail })),
     ...r.duplicates.map((x) => ({ Line: x.row, ClaimNumber: x.claimNumber, Outcome: "Excluded (duplicate)", Rule: x.rule, Detail: x.detail })),
     ...r.mappingExceptions.map((x) => ({ Line: x.row, ClaimNumber: x.claimNumber, Outcome: "Converted with exception", Rule: x.rule, Detail: x.detail })),
     ...r.unmappedColumns.map((h) => ({ Line: 1, ClaimNumber: "", Outcome: "Column not converted", Rule: "Unmapped column", Detail: `${h} retained in legacy archive` })),

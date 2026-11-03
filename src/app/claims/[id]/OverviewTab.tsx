@@ -102,6 +102,7 @@ function LegacyOverview({ claim }: { claim: Claim }) {
     <div className="space-y-4">
       <p className="rounded border border-sky-300 bg-sky-50 px-3 py-2 text-sm text-sky-950">
         <strong>Converted from the legacy system.</strong> Summary totals only; the detailed transaction history remains in the legacy archive.
+        {l.corrected && " This record was held for correction during conversion and converted after the Risk Manager corrected it (see the audit log)."}
       </p>
       <Card title="What happened">
         <p className="text-sm text-slate-800">{claim.description || "No description in the legacy record."}</p>

@@ -5,7 +5,7 @@ import Papa from "papaparse";
 import { useSyncExternalStore } from "react";
 import { demoTimestamp } from "./dates";
 import { summarize, type ClaimSummary } from "./finance";
-import { convert, type Mapping } from "./legacy";
+import { convert, type ConversionResult, type Corrections, type Mapping } from "./legacy";
 import { getSeed } from "./seed";
 import { DEFAULT_LIMITS, userForRole } from "./users";
 import type {
@@ -30,6 +30,7 @@ export interface MigrationRecord {
   fileName: string;
   bundled: boolean; // bundled file can be re-converted on reload; uploads last for the session only
   mapping: Mapping;
+  corrections: Corrections; // Risk Manager fixes to held rows, re-applied on every reload
   converted: number;
 }
 
@@ -83,6 +84,8 @@ export interface AppState {
   migration?: MigrationRecord;
   legacyStatus: LegacyStatus;
   legacyCount: number;
+  legacyResult?: ConversionResult; // latest conversion run, including the held-for-correction queue
+  legacyRows?: Record<string, string>[]; // parsed source rows (in memory only)
 }
 
 export type LegacyStatus = "none" | "loading" | "ready" | "error";
@@ -135,6 +138,8 @@ function build(o: Overlay): AppState {
     migration: o.migration,
     legacyStatus,
     legacyCount: legacyClaims.length,
+    legacyResult: legacyResult ?? undefined,
+    legacyRows: legacyRows ?? undefined,
   };
 }
 
@@ -145,6 +150,8 @@ const listeners = new Set<() => void>();
 // Converted legacy claims live in memory only; they are rebuilt from the bundled file on load.
 let legacyClaims: Claim[] = [];
 let legacyStatus: LegacyStatus = "none";
+let legacyResult: ConversionResult | null = null;
+let legacyRows: Record<string, string>[] | null = null;
 
 function refresh() {
   if (!overlay) return;
@@ -164,18 +171,19 @@ async function reloadApprovedLegacy(m: MigrationRecord) {
   legacyStatus = "loading";
   try {
     const { rows } = await fetchBundledLegacy();
-    legacyClaims = convert(rows, m.mapping).converted;
-    legacyStatus = "ready";
+    setLegacyConversion(rows, convert(rows, m.mapping, m.corrections ?? {}));
   } catch {
     legacyStatus = "error";
   }
   refresh();
 }
 
-/** Puts converted claims into search and reports (called when a conversion is approved or rolled back). */
-export function setLegacyClaims(claims: Claim[]) {
-  legacyClaims = claims;
-  legacyStatus = claims.length ? "ready" : "none";
+/** Puts converted claims into search and reports (on approval, correction, or rollback with nulls). */
+export function setLegacyConversion(rows: Record<string, string>[] | null, result: ConversionResult | null) {
+  legacyRows = rows;
+  legacyResult = result;
+  legacyClaims = result?.converted ?? [];
+  legacyStatus = result ? "ready" : "none";
 }
 
 function load(): Overlay {

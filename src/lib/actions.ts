@@ -6,8 +6,8 @@ import { TODAY, addDays, demoTimestamp } from "./dates";
 import { LIMIT_ROLE_LABELS, canApprove, claimReserveAfter, requiredLevel } from "./finance";
 import { money, moneyCents } from "./format";
 import { canEditClaim, canWorkClaim, canReopen } from "./permissions";
-import type { ConversionResult, Mapping } from "./legacy";
-import { auditEvent, getState, nextId, setLegacyClaims, updateOverlay, type Overlay } from "./store";
+import { convert, summaryLine, type ConversionResult, type Corrections, type Mapping } from "./legacy";
+import { auditEvent, getState, nextId, setLegacyConversion, updateOverlay, type Overlay } from "./store";
 import {
   CATEGORIES,
   type AuthorityLimits,
@@ -423,32 +423,76 @@ export const canEditLimits = (role: string) => role === "risk_manager";
 
 // ---------- Legacy conversion [3.2D, 3.21] ----------
 
-export function approveConversion(result: ConversionResult, mapping: Mapping, fileName: string, bundled: boolean): Result {
+/** Plain-language outcome for a re-validated row. */
+export function correctionOutcome(r: ConversionResult, line: number): Result {
+  const held = r.held.find((h) => h.row === line);
+  if (held) return fail(`Line ${line} is still held for correction: ${held.detail}`);
+  if (r.duplicates.some((d) => d.row === line)) return fail(`Line ${line} now duplicates an earlier claim number and is excluded.`);
+  return done(`Line ${line} now passes validation and converts.`);
+}
+
+export function approveConversion(
+  result: ConversionResult,
+  rows: Record<string, string>[],
+  mapping: Mapping,
+  corrections: Corrections,
+  fileName: string,
+  bundled: boolean,
+): Result {
   const s = getState();
   if (s.role !== "risk_manager") return fail("Only the Risk Manager can approve the conversion.");
   if (s.migration) return fail("A conversion has already been approved. Roll it back first to approve a different file.");
   const t = result.totals;
-  setLegacyClaims(result.converted);
+  setLegacyConversion(rows, result);
   updateOverlay((o) =>
     auditEvent(
       {
         ...o,
-        migration: { approvedAt: demoTimestamp(), approvedBy: s.user.id, fileName, bundled, mapping, converted: result.converted.length },
+        migration: { approvedAt: demoTimestamp(), approvedBy: s.user.id, fileName, bundled, mapping, corrections, converted: result.converted.length },
       },
       "Legacy conversion approved",
       undefined,
-      `${fileName}: ${t.source.rows} source rows; ${t.converted.rows} converted, ${t.rejected.rows} rejected, ${t.duplicates.rows} duplicates. ` +
-        `Converted paid ${money(t.converted.paid)}, outstanding ${money(t.converted.outstanding)}. Control totals tie out.`,
+      `${fileName}: ${t.source.rows} source records — ${summaryLine(result)}. ` +
+        `Converted paid ${money(t.converted.paid)}, outstanding ${money(t.converted.outstanding)}; held for correction ${money(t.held.paid)} paid. Control totals tie out.`,
     ),
   );
-  return done(`Conversion approved. ${result.converted.length.toLocaleString("en-US")} historical claims are now searchable.`);
+  return done(`Conversion approved. ${summaryLine(result)}.`);
+}
+
+/** Fixes a held row after approval and re-validates it; if it passes, it converts immediately. */
+export function correctLegacyRow(line: number, fix: Record<string, string>): Result {
+  const s = getState();
+  if (s.role !== "risk_manager") return fail("Only the Risk Manager can correct held rows.");
+  const m = s.migration;
+  if (!m || !s.legacyRows) return fail("The converted data is not loaded yet.");
+  const before = s.legacyRows[line - 2];
+  const claimNumber = s.legacyResult?.held.find((h) => h.row === line)?.claimNumber;
+  const corrections: Corrections = { ...m.corrections, [line]: { ...m.corrections?.[line], ...fix } };
+  const result = convert(s.legacyRows, m.mapping, corrections);
+  const outcome = correctionOutcome(result, line);
+  setLegacyConversion(s.legacyRows, result);
+  const was = (col: string) => m.corrections?.[line]?.[col] ?? before?.[col] ?? "";
+  const changes =
+    Object.entries(fix)
+      .filter(([col, v]) => v !== was(col))
+      .map(([col, v]) => `${col}: "${was(col)}" → "${v}"`)
+      .join("; ") || "no values changed";
+  updateOverlay((o) =>
+    auditEvent(
+      { ...o, migration: { ...m, corrections, converted: result.converted.length } },
+      outcome.ok ? "Held legacy row corrected and converted" : "Held legacy row corrected (still held)",
+      undefined,
+      `Line ${line}${claimNumber ? ` (${claimNumber})` : ""}: ${changes}`,
+    ),
+  );
+  return outcome;
 }
 
 export function rollbackConversion(): Result {
   const s = getState();
   if (s.role !== "risk_manager") return fail("Only the Risk Manager can roll back the conversion.");
   if (!s.migration) return fail("There is no approved conversion to roll back.");
-  setLegacyClaims([]);
+  setLegacyConversion(null, null);
   updateOverlay((o) => auditEvent({ ...o, migration: undefined }, "Legacy conversion rolled back", undefined, s.migration!.fileName));
   return done("Conversion rolled back. Converted claims have been removed.");
 }

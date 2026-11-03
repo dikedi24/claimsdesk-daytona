@@ -70,12 +70,19 @@ rows where paid + reserve doesn't equal incurred.
 The Migration page walks through: select the bundled file or upload a CSV → field mapping
 (auto-matched, editable) → validation → conversion report → **Approve conversion** (Risk Manager
 only).
-- The report reconciles records, paid, outstanding and incurred: source = converted + rejected +
-  duplicates, with a $0 difference required before approval.
+- **No record is discarded** (RFP 3.2D, "without loss of data"). Each row is converted, **held
+  for correction**, or excluded as a duplicate of a claim that did convert. The report summary reads
+  like "15,390 converted · 370 held for correction · 240 duplicates excluded · 0 records lost."
+- **Control totals** for records, paid, outstanding and incurred: Source total = Converted + Held
+  for correction + Duplicates excluded, with a $0.00 difference required in every column before
+  approval. If corrections change a dollar amount, their net effect is shown on its own line.
+- **Correction queue:** the Risk Manager can fix a held row's values inline and re-validate it. If
+  it passes, it converts immediately. This works before or after approval, and every correction
+  is audit-logged.
 - The exceptions list can be downloaded as CSV.
 - Approved claims appear in Claims search as closed, read-only historical claims.
-- Only the approval and the field mapping are saved, never the rows. The conversion is rebuilt
-  from the bundled file on each load.
+- Only the approval, the field mapping and the corrections are saved, never the rows. The
+  conversion is rebuilt from the bundled file on each load.
 
 Regenerate the file with `npm run generate:legacy`. It's deterministic, so the output is identical
 each time.

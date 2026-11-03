@@ -41,6 +41,7 @@ export interface LegacyInfo {
   paid: number;
   outstanding: number;
   incurred: number;
+  corrected?: boolean; // a Risk Manager corrected this row before it converted
 }
 
 // A reserve transaction sets the category's total reserve to newBalance (amount = change).
