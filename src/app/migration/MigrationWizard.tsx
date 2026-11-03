@@ -22,6 +22,7 @@ import {
 } from "@/components/ui";
 import { approveConversion, correctLegacyRow, correctionOutcome, rollbackConversion, type Result } from "@/lib/actions";
 import { DEPARTMENTS, deptLabel } from "@/lib/codes";
+import { downloadCsv } from "@/lib/csv";
 import { fmtDate, count, moneyCents } from "@/lib/format";
 import {
   DEPT_XWALK,
@@ -657,15 +658,7 @@ function ExceptionsCard({
   const current = Math.min(page, pages - 1); // stay in range as rows leave the queue
   const canFix = s.role === "risk_manager";
 
-  const download = () => {
-    const csv = Papa.unparse(exceptionRows(result));
-    const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `conversion_exceptions_${fileName.replace(/\.csv$/i, "")}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
+  const download = () => downloadCsv(`conversion_exceptions_${fileName.replace(/\.csv$/i, "")}`, exceptionRows(result));
 
   return (
     <Card

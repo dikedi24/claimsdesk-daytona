@@ -43,7 +43,8 @@ npm run generate:legacy   # regenerate public/legacy_export.csv (deterministic)
 | Admin: authority limits (Risk Manager only) | Built |
 | Legacy migration: mapping, validation, conversion report, approval | Built |
 | New Claim with AI-assisted intake (offline fallback) | Built |
-| Reports, Roadmap | Placeholder pages |
+| Reports: as-of by department with drill-down, claims-by-year chart, litigation by firm, CSV | Built |
+| Roadmap: RFP coverage (Built / Simulated in demo / Roadmap) | Built |
 
 ### Financial rules in the claim workspace
 - **Incurred = paid + outstanding reserve**, tracked per category (Medical, Indemnity, Expense).
@@ -107,6 +108,26 @@ each time.
   fills the form (it handles the 3 samples). The page shows an "Offline extraction" note giving
   the reason, and the badges say "Suggested from report (offline parser)".
 
+### Reports
+- **"As of" report:** open claim counts and incurred by department, split WC vs. GL, as they
+  stood on any date. Figures are rebuilt from dated reserve and payment transactions. Select a
+  department to drill down to its claims, with each claim's status, paid, outstanding and
+  incurred on that date.
+- **Claims by year:** claims reported or total incurred per loss year, WC vs. GL, switchable
+  between bar and line. The chart is a small dependency-free SVG with a legend, hover values
+  and a data table.
+- **Litigated claims by defense firm:** claim count, active claims, total paid to the firm,
+  and incurred.
+- **CSV download on every report**, including the drill-down.
+- **Converted legacy claims:** once the conversion is approved, the reports include them and
+  the loss-year range extends back to 2006. They carry final summary totals only.
+
+### Roadmap
+A table of the RFP requirement areas, each marked **Built**, **Simulated in demo** or
+**Roadmap**, with what the demo does and one line on the production approach. This includes
+Florida DWC EDI, bill review, City financial system integration, HIPAA with SSO/MFA, hosting and
+backups, custom fields, and data export at termination.
+
 ### What each role can do
 | Role | Can do |
 | --- | --- |
@@ -137,6 +158,8 @@ src/lib/actions.ts  claim actions (reserves, payments, diary, close) with valida
 src/lib/permissions.ts what the current role may do
 src/lib/legacy.ts   legacy field mapping, validation rules, control totals
 src/lib/intake.ts   intake extraction schema, validation, offline rule-based parser
+src/lib/reports.ts  as-of, by-department, litigation and by-year report calculations
+src/components/Chart.tsx  dependency-free bar/line SVG chart
 src/app/api/extract/route.ts  server route that calls Claude (falls back to the offline parser)
 src/lib/store.ts    seed + localStorage overlay, Reset demo
 scripts/generate-legacy.mjs  generates public/legacy_export.csv
